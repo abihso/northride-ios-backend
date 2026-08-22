@@ -1,0 +1,3 @@
+ALTER TABLE "User_system_config" ADD COLUMN "user_id" integer NOT NULL;--> statement-breakpoint
+ALTER TABLE "User_system_config" ADD CONSTRAINT "User_system_config_user_id_users_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("user_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "User_system_config" ADD CONSTRAINT "User_system_config_user_id_unique" UNIQUE("user_id");

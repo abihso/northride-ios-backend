@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "disableNotifications" boolean DEFAULT false;
