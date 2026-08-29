@@ -11,7 +11,6 @@ const deliveryRouter = Router();
 
 // 1. Create a new delivery order
 deliveryRouter.post("/deliveries", async (req, res) => {
-  console.log("hit")
   try {
     const { 
       senderId,               
@@ -21,13 +20,11 @@ deliveryRouter.post("/deliveries", async (req, res) => {
       pickupLongitude,      
       pickupContactName,    
       pickupContactPhone,   
-      pickupInstructions,   
       dropoffAddress,       
       dropoffLatitude,      
       dropoffLongitude,     
       recipientName,        
       recipientPhone,       
-      dropoffInstructions,  
       packageWeightKg,      
       distanceKm,           
       deliveryFee,          
@@ -49,13 +46,11 @@ deliveryRouter.post("/deliveries", async (req, res) => {
           pickupLongitude,
           pickupContactName,
           pickupContactPhone,
-          pickupInstructions,
           dropoffAddress,
           dropoffLatitude,
           dropoffLongitude,
           recipientName,
           recipientPhone,
-          dropoffInstructions,
           packageWeightKg,
           isFragile : true,
           distanceKm,
