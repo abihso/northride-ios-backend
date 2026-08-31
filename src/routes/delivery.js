@@ -11,6 +11,7 @@ const deliveryRouter = Router();
 
 // 1. Create a new delivery order
 deliveryRouter.post("/deliveries", async (req, res) => {
+  console.log(req.body)
   try {
     const { 
       senderId,               
@@ -29,7 +30,8 @@ deliveryRouter.post("/deliveries", async (req, res) => {
       distanceKm,           
       deliveryFee,          
       totalAmount,          
-      paymentMethod,        
+      paymentMethod,   
+      paymentStatus,     
     } = req.body;
                 
     const deliveryReference = `DEL-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
@@ -58,7 +60,7 @@ deliveryRouter.post("/deliveries", async (req, res) => {
           tipAmount : 0,
           totalAmount,
           paymentMethod,
-          paymentStatus: "pending", 
+          paymentStatus, 
           deliveryReference
         })
         .returning();
@@ -304,6 +306,8 @@ deliveryRouter.get("/riders/:riderId/earnings", async (req, res) => {
 });
 
 deliveryRouter.get("/users/:userId/deliveries/:status/:category", async (req, res) => {
+                    // /users/7/deliveries/delivered/send
+  console.log("hit")
   try {
     const userId = parseInt(req.params.userId);
     const status = req.params.status;
@@ -315,8 +319,8 @@ deliveryRouter.get("/users/:userId/deliveries/:status/:category", async (req, re
       .from(schema.deliveries)
       .where(and(
         eq(schema.deliveries.senderId, userId),
-        eq(schema.deliveries.deliveryType, status),
-        eq(schema.deliveries.status, category)
+        eq(schema.deliveries.deliveryType, category),
+        eq(schema.deliveries.status, status)
       ))
       .orderBy(desc(schema.deliveries.createdAt));
 

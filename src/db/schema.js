@@ -22,8 +22,8 @@ export const vehicleTypeEnum = pgEnum("vehicle_type", ["bicycle", "motorcycle", 
 export const rideTypeEnum = pgEnum("ride_type", ["standard", "premium", "shared", "luxury"]);
 export const bookingTypeEnum = pgEnum("booking_type", ["now", "scheduled"]);
 export const rideStatusEnum = pgEnum("ride_status", ["pending", "searching", "confirmed", "arrived", "in_progress", "completed", "cancelled", "rejected", "no_show"]);
-export const paymentMethodEnum = pgEnum("payment_method", ["cash", "card", "wallet", "bank_transfer"]);
-export const paymentStatusEnum = pgEnum("payment_status", ["pending", "paid", "failed", "refunded"]);
+export const paymentMethodEnum = pgEnum("payment_method", ["cash", "card", "wallet", "bank_transfer","paystack"]);
+export const paymentStatusEnum = pgEnum("payment_status", ["pending", "paid", "failed", "refunded","paidandwaiting"]);
 export const orderTypeEnum = pgEnum("order_type", ["delivery", "pickup", "ride"]);
 export const orderStatusEnum = pgEnum("order_status", ["pending", "confirmed", "preparing", "ready", "picked_up", "in_transit", "delivered", "cancelled", "rejected"]);
 export const addressTypeEnum = pgEnum("address_type", ["home", "work", "other"]);
@@ -38,7 +38,7 @@ export const applicableToEnum = pgEnum("applicable_to", ["delivery", "ride", "bo
 export const earningTypeEnum = pgEnum("earning_type", ["delivery", "ride", "bonus"]);
 export const matchStatusEnum = pgEnum("match_status", ["pending", "accepted", "rejected", "completed"]);
 export const paymentTypeEnum = pgEnum("payment_type", ["order", "ride", "delivery", "wallet_topup", "withdrawal"]);
-export const deliveryTypeEnum = pgEnum("delivery_type", ["send", "receive"]);
+export const deliveryTypeEnum = pgEnum("delivery_type", ["send", "receive","ride"]);
 export const deliveryStatusEnum = pgEnum("delivery_status", ["pending", "searching", "accepted", "picked_up", "in_transit", "delivered", "failed", "cancelled"]);
 
 // =============================================
