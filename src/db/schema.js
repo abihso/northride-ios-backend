@@ -52,6 +52,7 @@ export const users = pgTable("users", {
   passwordHash: varchar("password_hash", { length: 255 }).notNull(),
   profilePicture: varchar("profile_picture", { length: 255 }).default("not set yet"),
   userType: userTypeEnum("user_type").default("customer"),
+  riderOnboardingCompleted: boolean("rider_onboarding_completed").notNull().default(false),
   isVerified: boolean("is_verified").default(false),
   disableNotifications: boolean("disableNotifications").default(false),
   isActive: boolean("is_active").default(true),

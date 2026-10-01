@@ -92,6 +92,13 @@
       "when": 1788106881414,
       "tag": "0012_busy_mockingbird",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1790812800000,
+      "tag": "0013_rider_onboarding",
+      "breakpoints": true
     }
   ]
 }

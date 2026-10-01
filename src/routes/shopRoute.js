@@ -1,8 +1,9 @@
+import { eq } from "drizzle-orm";
 import { Router } from "express";
-import { eq, and, or, like, between, desc, asc, sql } from "drizzle-orm";
+import db from "../db/index.js";
 import * as schema from "../db/schema.js";
 
-const shoproute = Router()
+const shoproute = Router();
 // =============================================
 // SHOP ROUTES
 // =============================================
@@ -12,7 +13,7 @@ shoproute.get("/shops", async (req, res) => {
   try {
     const { isOpen, isVerified, city, limit = 100 } = req.query;
     let query = db.select().from(schema.shops);
-    
+
     if (isOpen !== undefined) {
       query = query.where(eq(schema.shops.isOpen, isOpen === "true"));
     }
@@ -22,7 +23,7 @@ shoproute.get("/shops", async (req, res) => {
     if (city) {
       query = query.where(eq(schema.shops.city, city));
     }
-    
+
     const shops = await query.limit(parseInt(limit));
     res.json({ success: true, data: shops });
   } catch (error) {
@@ -33,19 +34,23 @@ shoproute.get("/shops", async (req, res) => {
 // Get shop by ID
 shoproute.get("/shops/:id", async (req, res) => {
   try {
-    const [shop] = await db.select()
+    const [shop] = await db
+      .select()
       .from(schema.shops)
       .where(eq(schema.shops.shopId, parseInt(req.params.id)));
-    
+
     if (!shop) {
-      return res.status(404).json({ success: false, message: "Shop not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Shop not found" });
     }
-    
+
     // Get shop products
-    const products = await db.select()
+    const products = await db
+      .select()
       .from(schema.products)
       .where(eq(schema.products.shopId, shop.shopId));
-    
+
     res.json({ success: true, data: { ...shop, products } });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -73,30 +78,33 @@ shoproute.post("/shops", async (req, res) => {
       openingTime,
       closingTime,
     } = req.body;
-    
-    const [shop] = await db.insert(schema.shops).values({
-      ownerId,
-      shopName,
-      shopDescription,
-      shopCategory,
-      address,
-      city,
-      state,
-      country,
-      latitude,
-      longitude,
-      phoneNumber,
-      email,
-      logo,
-      coverImage,
-      openingTime,
-      closingTime,
-    }).returning();
-    
+
+    const [shop] = await db
+      .insert(schema.shops)
+      .values({
+        ownerId,
+        shopName,
+        shopDescription,
+        shopCategory,
+        address,
+        city,
+        state,
+        country,
+        latitude,
+        longitude,
+        phoneNumber,
+        email,
+        logo,
+        coverImage,
+        openingTime,
+        closingTime,
+      })
+      .returning();
+
     res.status(201).json({ success: true, data: shop });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 });
 
-export default shoproute
+export default shoproute;
