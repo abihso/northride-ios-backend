@@ -282,6 +282,17 @@ test("login and restoration return persisted onboarding state without exposing p
   assert.equal(unauthenticated.statusCode, 401);
 });
 
+test("login returns the not verified response for unverified accounts", async () => {
+  const passport = {
+    authenticate: (_strategy, callback) => () =>
+      callback(null, false, { message: "not verified" }),
+  };
+  const res = response();
+  await createLoginHandler(passport)(request(null), res, () => {});
+  assert.equal(res.statusCode, 401);
+  assert.deepEqual(res.body, { success: false, message: "not verified" });
+});
+
 test("onboarding is scoped to the authenticated rider and cannot grant privileges", async () => {
   const rider = account(7);
   const { db, state } = fixture([rider, account(8)]);

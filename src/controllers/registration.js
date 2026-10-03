@@ -17,7 +17,8 @@ export const createRegistrationHandler =
     sendSms,
     sendVerificationEmail,
   }) =>
-  async (req, res) => {
+    async (req, res) => {
+    console.log("hit registration handler");
     try {
       const { passwordHash, userType } = req.body || {};
       const role = registrationRole(userType);

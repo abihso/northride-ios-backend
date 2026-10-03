@@ -17,7 +17,7 @@ passport.deserializeUser(async (id, done) => {
       .where(eq(users.userId, id))
       .limit(1);
     if (existingUser.length === 0) {
-      throw new Error("user not found");
+      return done(null, false);
     }
     done(null, existingUser[0]);
   } catch (error) {
@@ -40,13 +40,16 @@ export default passport.use(
       if (existingUser.length === 0) {
         throw new Error("user not found");
       }
-      if (!existingUser[0].isActive || !existingUser[0].isVerified) {
-        throw new Error("Account is inactive or not verified");
-      }
       if (!verifyPassword(existingUser[0].passwordHash, password)) {
         throw new Error("Wrong credentials");
       }
       const user = existingUser[0];
+      if (!user.isActive) {
+        throw new Error("Account is inactive or not verified");
+      }
+      if (!user.isVerified) {
+        return done(null, false, { message: "not verified" });
+      }
       done(null, user);
     } catch (error) {
       done(error, null);
