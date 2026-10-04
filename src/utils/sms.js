@@ -7,7 +7,6 @@ const infobip = new Infobip({
 });
 
 async function sendSms({ to, text }) {
-    console.log(text, to);
     try {
         const response = await infobip.channels.sms.send({
             messages: [
@@ -18,9 +17,10 @@ async function sendSms({ to, text }) {
                 },
             ],
         });
-
+        return response;
     } catch (error) {
         console.error("Error sending message:", error);
+        throw error;
     }
 }
 

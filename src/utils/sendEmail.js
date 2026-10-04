@@ -35,7 +35,7 @@ async function sendVerificationEmail(verificationCode, recipientEmail) {
     
   } catch (error) {
     console.error("Error sending email:", error);
-    return { success: false, error: error.message };
+    throw error;
   }
 }
 
