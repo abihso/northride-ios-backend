@@ -12,7 +12,7 @@ configRoute.post("/payment-method", async (req, res) => {
     if (!data) {
       return res.status(400).json({
         success: false,
-        message: "Missing required field: 'data' is required.",
+        message: "Missing required field: 'data' is required",
       });
     }
 
