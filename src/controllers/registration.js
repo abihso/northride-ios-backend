@@ -19,6 +19,7 @@ export const createRegistrationHandler =
   }) =>
     async (req, res) => {
     console.log("hit registration handler");
+    let user;
     try {
       const { passwordHash, userType } = req.body || {};
       const role = registrationRole(userType);
@@ -48,7 +49,7 @@ export const createRegistrationHandler =
             message: "User with this email already exists",
           });
       }
-      const [user] = await db
+      [user] = await db
         .insert(users)
         .values({
           email,
@@ -83,6 +84,15 @@ export const createRegistrationHandler =
         requiresVerification: true,
       });
     } catch (error) {
+      if (user) {
+        return res.status(502).json({
+          success: false,
+          message:
+            "Your account was created, but we could not send the verification code. Please try sending it again.",
+          accountCreated: true,
+          requiresVerification: true,
+        });
+      }
       return res.status(error.status || 500).json({
         success: false,
         message: error.status

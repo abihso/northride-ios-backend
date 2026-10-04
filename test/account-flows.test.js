@@ -164,13 +164,14 @@ const profile = {
   bankAccountNumber: "0123456789",
   bankName: "Test Bank",
 };
-const registration = (db) =>
+const registration = (db, overrides = {}) =>
   createRegistrationHandler({
     db,
     hashpassword: () => "hashed-password",
     generateSixDigitCode: () => 123456,
     sendSms: async () => {},
     sendVerificationEmail: async () => {},
+    ...overrides,
   });
 
 test("registration persists rider/client choices and defaults legacy clients", async () => {
@@ -215,6 +216,30 @@ test("registration rejects administrator and invalid roles before any database w
     assert.equal(res.statusCode, 400);
     assert.equal(state.users.length, 0);
   }
+});
+
+test("registration reports a saved account when verification delivery fails", async () => {
+  const { db, state } = fixture();
+  const res = response();
+  await registration(db, {
+    sendVerificationEmail: async () => {
+      throw new Error("mail provider unavailable");
+    },
+  })(
+    request(null, {
+      email: "new@example.test",
+      passwordHash: "password",
+    }),
+    res,
+  );
+
+  assert.equal(res.statusCode, 502);
+  assert.equal(state.users.length, 1);
+  assert.equal(state.users[0].isVerified, false);
+  assert.equal(res.body.success, false);
+  assert.equal(res.body.accountCreated, true);
+  assert.equal(res.body.requiresVerification, true);
+  assert.match(res.body.message, /created.*could not send/i);
 });
 
 test("verification signs in the selected rider and persists a safe session response", async () => {
