@@ -7,6 +7,15 @@ Set `SESSION_SECRET` to a unique random value and configure `CLIENT_ORIGINS`
 with the exact browser origins used by the deployed client. Production startup
 fails closed if `SESSION_SECRET` is missing.
 
+Email verification is sent through the Brevo HTTPS API, so outbound SMTP is
+not required. Set `BREVO_API_KEY` and `BREVO_FROM_EMAIL` in the backend
+environment, including the Render service's Environment settings. The sender
+address must be added and verified in Brevo. Brevo allows verifying a sender
+address by receiving a confirmation code at that address; domain
+authentication is recommended but is not required just to verify a sender.
+`BREVO_FROM_NAME` is optional and defaults to `NorthRide`. `SMTP_USER`,
+`SMTP_PASS`, `RESEND_API_KEY`, and `RESEND_FROM_EMAIL` are not used.
+
 `GOOGLE_MAPS_SERVER_API_KEY` is used only by the authenticated Places and
 Directions endpoints and for server-side delivery quotes. Restrict it to the
 Places API and Directions API, plus the backend's outbound IP where supported.
