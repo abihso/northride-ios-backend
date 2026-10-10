@@ -41,6 +41,28 @@ export function createRiderDashboardHandler({ db }) {
         });
       }
 
+      let savedPreferences;
+      try {
+        [savedPreferences] = await db
+          .select({
+            receiveRideOffers: schema.riderPreferences.receiveRideOffers,
+            receiveDeliveryOffers:
+              schema.riderPreferences.receiveDeliveryOffers,
+          })
+          .from(schema.riderPreferences)
+          .where(eq(schema.riderPreferences.userId, req.user.userId))
+          .limit(1);
+      } catch (error) {
+        if (error.code !== "42P01") throw error;
+        console.warn(
+          "rider_preferences table is missing; using default offer preferences until migrations are applied.",
+        );
+      }
+      const preferences = savedPreferences ?? {
+        receiveRideOffers: true,
+        receiveDeliveryOffers: true,
+      };
+
       const [activeDeliveries, activeRides, totals] = await Promise.all([
         db
           .select()
@@ -116,7 +138,8 @@ export function createRiderDashboardHandler({ db }) {
         }
 
         [deliveryOffers, rideOffers] = await Promise.all([
-          db
+          preferences.receiveDeliveryOffers
+            ? db
             .select({
               deliveryId: schema.deliveries.deliveryId,
               deliveryReference: schema.deliveries.deliveryReference,
@@ -138,8 +161,10 @@ export function createRiderDashboardHandler({ db }) {
             .from(schema.deliveries)
             .where(and(...deliveryConditions))
             .orderBy(desc(schema.deliveries.createdAt))
-            .limit(20),
-          db
+            .limit(20)
+            : Promise.resolve([]),
+          preferences.receiveRideOffers
+            ? db
             .select({
               rideId: schema.rideBookings.rideId,
               rideReference: schema.rideBookings.rideReference,
@@ -166,7 +191,8 @@ export function createRiderDashboardHandler({ db }) {
             .from(schema.rideBookings)
             .where(and(...rideConditions))
             .orderBy(desc(schema.rideBookings.bookedAt))
-            .limit(20),
+            .limit(20)
+            : Promise.resolve([]),
         ]);
       }
 
@@ -185,6 +211,7 @@ export function createRiderDashboardHandler({ db }) {
         },
       });
     } catch (error) {
+      console.error("Rider dashboard request failed:", error);
       return res.status(500).json({ success: false, message: error.message });
     }
   };

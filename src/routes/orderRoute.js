@@ -8,6 +8,30 @@ import { getDeliveryQuote } from "./mapsRoute.js";
 
 const orderroute = Router();
 
+orderroute.get("/admin/orders", async (req, res) => {
+  if (req.user?.userType !== "admin") {
+    return res.status(403).json({
+      success: false,
+      message: "Administrator access required.",
+    });
+  }
+  try {
+    const limit = Math.max(1, Math.min(200, Number(req.query.limit) || 100));
+    const orders = await db
+      .select()
+      .from(schema.orders)
+      .orderBy(desc(schema.orders.orderPlacedAt))
+      .limit(limit);
+    return res.json({ success: true, data: orders });
+  } catch (error) {
+    console.error("Could not load admin order queue:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Could not load the order queue.",
+    });
+  }
+});
+
 // =============================================
 // ORDER ROUTES
 // =============================================

@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { Router } from "express";
 import db from "../db/index.js";
 import * as schema from "../db/schema.js";
@@ -22,17 +22,37 @@ notificationrouter.get("/users/:userId/notifications", async (req, res) => {
   }
   try {
     const { isRead, limit = 50 } = req.query;
-    let query = db
+    const [preferences] = await db
+      .select({
+        receiveRideUpdates: schema.riderPreferences.receiveRideUpdates,
+        receiveDeliveryUpdates: schema.riderPreferences.receiveDeliveryUpdates,
+        receivePaymentUpdates: schema.riderPreferences.receivePaymentUpdates,
+        receiveAccountUpdates: schema.riderPreferences.receiveAccountUpdates,
+      })
+      .from(schema.riderPreferences)
+      .where(eq(schema.riderPreferences.userId, Number(req.params.userId)))
+      .limit(1);
+    const enabledTypes = [
+      ...(preferences?.receiveRideUpdates !== false ? ["ride"] : []),
+      ...(preferences?.receiveDeliveryUpdates !== false ? ["delivery"] : []),
+      ...(preferences?.receivePaymentUpdates !== false ? ["payment"] : []),
+      ...(preferences?.receiveAccountUpdates !== false
+        ? ["system", "order", "promotion"]
+        : []),
+    ];
+    const conditions = [
+      eq(schema.notifications.userId, Number(req.params.userId)),
+      inArray(schema.notifications.type, enabledTypes),
+    ];
+    if (isRead !== undefined) {
+      conditions.push(eq(schema.notifications.isRead, isRead === "true"));
+    }
+    const notifications = await db
       .select()
       .from(schema.notifications)
-      .where(eq(schema.notifications.userId, parseInt(req.params.userId)))
-      .orderBy(desc(schema.notifications.createdAt));
-
-    if (isRead !== undefined) {
-      query = query.where(eq(schema.notifications.isRead, isRead === "true"));
-    }
-
-    const notifications = await query.limit(parseInt(limit));
+      .where(and(...conditions))
+      .orderBy(desc(schema.notifications.createdAt))
+      .limit(Math.max(1, Math.min(100, Number(limit) || 50)));
 
     // Get unread count
     const unreadCount = await db
@@ -42,8 +62,9 @@ notificationrouter.get("/users/:userId/notifications", async (req, res) => {
       .from(schema.notifications)
       .where(
         and(
-          eq(schema.notifications.userId, parseInt(req.params.userId)),
+          eq(schema.notifications.userId, Number(req.params.userId)),
           eq(schema.notifications.isRead, false),
+          inArray(schema.notifications.type, enabledTypes),
         ),
       );
 
@@ -51,7 +72,7 @@ notificationrouter.get("/users/:userId/notifications", async (req, res) => {
       success: true,
       data: {
         notifications,
-        unreadCount: parseInt(unreadCount[0].count),
+        unreadCount: Number(unreadCount[0]?.count ?? 0),
       },
     });
   } catch (error) {

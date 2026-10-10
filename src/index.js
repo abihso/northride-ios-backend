@@ -22,6 +22,7 @@ import promotionrouter from "./routes/promotionRoute.js";
 import ridesbookroute from "./routes/rideBookingsRoutes.js";
 import ridersearningsrouter from "./routes/ridersEarningsRoutes.js";
 import riderRoute from "./routes/ridersRoute.js";
+import riderSettingsRoute from "./routes/riderSettingsRoute.js";
 import shoproute from "./routes/shopRoute.js";
 import sysrouter from "./routes/systemConfigRoute.js";
 import ticketrouter from "./routes/ticketRoute.js";
@@ -37,7 +38,7 @@ const allowedOrigins = new Set(
     process.env.CLIENT_ORIGINS ||
     (isProduction
       ? ""
-      : "http://localhost:8081,http://127.0.0.1:8081,http://localhost:19006")
+      : "http://localhost:8081,http://127.0.0.1:8081,http://localhost:19006,http://localhost:5173,http://127.0.0.1:5173")
   )
     .split(",")
     .map((origin) => origin.trim())
@@ -192,6 +193,7 @@ app.use("/api", (req, res, next) => {
 
 app.use("/api", userRoute);
 app.use("/api", riderRoute);
+app.use("/api", riderSettingsRoute);
 app.use("/api", shoproute);
 app.use("/api", authRoute);
 app.use("/api", productroute);

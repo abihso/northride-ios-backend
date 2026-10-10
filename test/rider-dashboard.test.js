@@ -30,9 +30,13 @@ function mockDb(results) {
               return query;
             },
             limit(limit) {
+              if (result instanceof Error) return Promise.reject(result);
               return Promise.resolve(result.slice(0, limit));
             },
             then(resolve, reject) {
+              if (result instanceof Error) {
+                return Promise.reject(result).then(resolve, reject);
+              }
               return Promise.resolve(result).then(resolve, reject);
             },
           };
@@ -117,6 +121,58 @@ test("dashboard scopes rider data and only selects safe offer fields", async () 
   assert.equal("recipientPhone" in deliveryOfferQuery.selection, false);
   assert.equal("pickupContactPhone" in deliveryOfferQuery.selection, false);
   assert.equal("deliveryPin" in deliveryOfferQuery.selection, false);
+});
+
+test("rider offer preferences independently hide offer types", async () => {
+  const { db } = mockDb({
+    riders: [[rider]],
+    rider_preferences: [[
+      { receiveRideOffers: true, receiveDeliveryOffers: false },
+    ]],
+    deliveries: [[], [{ deliveryId: 9 }]],
+    ride_bookings: [[], [{ rideId: 12 }]],
+    rider_earnings: [
+      [{ totalEarned: 0, totalPending: 0, totalPaid: 0 }],
+    ],
+    rider_rejections: [[]],
+  });
+  const res = response();
+
+  await createRiderDashboardHandler({ db })(
+    { user: { userId: 7 }, params: {} },
+    res,
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.data.offers.deliveries, []);
+  assert.deepEqual(res.body.data.offers.rides, [{ rideId: 12 }]);
+});
+
+test("dashboard uses default offer preferences until the new table migration is applied", async () => {
+  const missingPreferencesTable = Object.assign(
+    new Error('relation "rider_preferences" does not exist'),
+    { code: "42P01" },
+  );
+  const { db } = mockDb({
+    riders: [[rider]],
+    rider_preferences: [missingPreferencesTable],
+    deliveries: [[], [{ deliveryId: 9 }]],
+    ride_bookings: [[], [{ rideId: 12 }]],
+    rider_earnings: [
+      [{ totalEarned: 0, totalPending: 0, totalPaid: 0 }],
+    ],
+    rider_rejections: [[]],
+  });
+  const res = response();
+
+  await createRiderDashboardHandler({ db })(
+    { user: { userId: 7 }, params: {} },
+    res,
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.data.offers.deliveries, [{ deliveryId: 9 }]);
+  assert.deepEqual(res.body.data.offers.rides, [{ rideId: 12 }]);
 });
 
 test("offline riders receive no work offers", async () => {

@@ -80,6 +80,20 @@ export const userSystemConfig = pgTable("User_system_config", {
   // config_group_idx: index("config_group_idx").on(table.configGroup),
 }));
 
+export const riderPreferences = pgTable("rider_preferences", {
+  preferenceId: serial("preference_id").primaryKey(),
+  userId: integer("user_id").notNull().unique().references(() => users.userId, { onDelete: "cascade" }),
+  receiveRideOffers: boolean("receive_ride_offers").notNull().default(true),
+  receiveDeliveryOffers: boolean("receive_delivery_offers").notNull().default(true),
+  receiveRideUpdates: boolean("receive_ride_updates").notNull().default(true),
+  receiveDeliveryUpdates: boolean("receive_delivery_updates").notNull().default(true),
+  receivePaymentUpdates: boolean("receive_payment_updates").notNull().default(true),
+  receiveAccountUpdates: boolean("receive_account_updates").notNull().default(true),
+  preferredContactMethod: varchar("preferred_contact_method", { length: 20 }).notNull().default("email"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().$onUpdate(() => new Date()),
+});
+
 // =============================================
 // 2. RIDERS TABLE
 // =============================================
@@ -578,6 +592,7 @@ export const supportTickets = pgTable("support_tickets", {
   subject: varchar("subject", { length: 100 }).notNull(),
   message: text("message").notNull(),
   category: supportCategoryEnum("category").default("other"),
+  contactMethod: varchar("contact_method", { length: 20 }),
   priority: priorityEnum("priority").default("medium"),
   status: supportStatusEnum("status").default("open"),
   assignedTo: integer("assigned_to").references(() => users.userId, { onDelete: "set null" }),
@@ -804,4 +819,5 @@ export const allTables = {
   surgePricingLog,
   auditLogs,
   userSystemConfig,
+  riderPreferences,
 };

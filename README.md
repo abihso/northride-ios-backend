@@ -52,14 +52,22 @@ New profiles remain unapproved and unavailable; finishing onboarding does not
 grant permission to accept work. Document uploads are not implemented by this
 endpoint.
 
-Before starting this backend version, apply migration `0013_rider_onboarding`
-to the configured PostgreSQL database from this directory:
+Before starting this backend version, apply migrations `0013_rider_onboarding`,
+`0014_rider_preferences`, and `0015_support_contact_preference` to the
+configured PostgreSQL database from this directory:
 
 ```sh
 npm run db:migrate
 npm test
 npm start
 ```
+
+Rider preferences are stored per account and filter available ride/delivery
+offers and in-app notification categories. Saved rider places use the existing
+`user_addresses` table. Rider account removal deactivates the account and
+anonymizes personal profile, location, document, and payout details while
+retaining transaction history. Removal is blocked while the rider has active
+work or unpaid earnings.
 
 The migration adds the persisted completion flag and marks existing approved
 riders as complete. Existing clients keep their current dashboard access.

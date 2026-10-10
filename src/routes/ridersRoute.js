@@ -85,7 +85,22 @@ riderRoute.get("/riders", async (req, res) => {
   }
   try {
     const { isAvailable, isApproved, limit = 100 } = req.query;
-    let query = db.select().from(schema.riders);
+    let query = db.select({
+      riderId: schema.riders.riderId,
+      userId: schema.riders.userId,
+      vehicleType: schema.riders.vehicleType,
+      vehiclePlateNumber: schema.riders.vehiclePlateNumber,
+      vehicleModel: schema.riders.vehicleModel,
+      vehicleColor: schema.riders.vehicleColor,
+      licenseNumber: schema.riders.licenseNumber,
+      isAvailable: schema.riders.isAvailable,
+      isApproved: schema.riders.isApproved,
+      idCardImage: schema.riders.idCardImage,
+      driverLicenseImage: schema.riders.driverLicenseImage,
+      vehicleRegistrationImage: schema.riders.vehicleRegistrationImage,
+      insuranceImage: schema.riders.insuranceImage,
+      createdAt: schema.riders.createdAt,
+    }).from(schema.riders);
 
     if (isAvailable !== undefined) {
       query = query.where(
@@ -100,6 +115,49 @@ riderRoute.get("/riders", async (req, res) => {
     res.json({ success: true, data: riders });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+riderRoute.patch("/riders/:id/review", async (req, res) => {
+  if (!isAdmin(req)) {
+    return res
+      .status(403)
+      .json({ success: false, message: "Administrator access required." });
+  }
+  if (typeof req.body?.isApproved !== "boolean") {
+    return res.status(400).json({
+      success: false,
+      message: "Rider review decision must be true or false.",
+    });
+  }
+  const riderId = Number(req.params.id);
+  if (!Number.isInteger(riderId) || riderId <= 0) {
+    return res.status(400).json({
+      success: false,
+      message: "Rider not found.",
+    });
+  }
+  try {
+    const [rider] = await db
+      .update(schema.riders)
+      .set({
+        isApproved: req.body.isApproved,
+        ...(req.body.isApproved ? {} : { isAvailable: false }),
+      })
+      .where(eq(schema.riders.riderId, riderId))
+      .returning();
+    if (!rider) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Rider not found." });
+    }
+    return res.json({ success: true, data: rider });
+  } catch (error) {
+    console.error("Could not update rider application review:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Could not update the rider application.",
+    });
   }
 });
 
