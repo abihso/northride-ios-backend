@@ -168,7 +168,7 @@ app.use("/api", (req, res, next) => {
   if (!req.isAuthenticated?.()) {
     return res
       .status(401)
-      .json({ success: false, message: "Authentication required." });
+      .json({ success: false, message: "Authentication required" });
   }
   const isAdminMutation =
     (req.method === "POST" &&
