@@ -74,6 +74,7 @@ test("rider removal anonymizes profile data and preserves transaction tables", a
     deliveries: [[]],
     ride_bookings: [[]],
     rider_earnings: [[]],
+    rider_documents: [[{ storageKey: "rider-documents/7/example" }]],
   });
   const req = {
     user: riderUser,
@@ -89,7 +90,11 @@ test("rider removal anonymizes profile data and preserves transaction tables", a
   };
   const res = response();
 
-  await createDeleteAccountHandler({ db })(req, res);
+  const removedDocuments = [];
+  await createDeleteAccountHandler({
+    db,
+    deleteStoredDocumentFn: async (key) => removedDocuments.push(key),
+  })(req, res);
 
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.success, true);
@@ -104,8 +109,15 @@ test("rider removal anonymizes profile data and preserves transaction tables", a
   assert.equal(updates[1].values.isActive, false);
   assert.deepEqual(
     deletes,
-    ["rider_locations", "user_addresses", "rider_preferences", "notifications"],
+    [
+      "rider_locations",
+      "rider_documents",
+      "user_addresses",
+      "rider_preferences",
+      "notifications",
+    ],
   );
+  assert.deepEqual(removedDocuments, ["rider-documents/7/example"]);
 });
 
 test("rider removal is blocked while earnings remain pending", async () => {
@@ -114,6 +126,7 @@ test("rider removal is blocked while earnings remain pending", async () => {
     deliveries: [[]],
     ride_bookings: [[]],
     rider_earnings: [[{ earningId: 1 }]],
+    rider_documents: [[{ storageKey: "rider-documents/7/example" }]],
   });
   const req = {
     user: riderUser,

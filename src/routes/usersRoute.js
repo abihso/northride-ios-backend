@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import { Router } from "express";
+import { createAdminManagedUserHandler } from "../controllers/adminUsers.js";
 import db from "../db/index.js";
 import * as schema from "../db/schema.js";
 import { users } from "../db/schema.js";
@@ -8,6 +9,7 @@ import hashpassword from "../utils/hashpassword.js";
 import sendVerificationEmail from "../utils/sendEmail.js";
 import generateSixDigitCode from "../utils/sixdigits.js";
 import sendSms from "../utils/sms.js";
+import { deleteStoredDocument } from "../services/riderDocumentStorage.js";
 import {
   createRegistrationHandler,
   createVerificationHandler,
@@ -15,7 +17,10 @@ import {
 import { normalizeIdentifier, saveSession } from "../utils/authUser.js";
 const userRoute = Router();
 
-const isAdmin = (req) => req.user?.userType === "admin";
+const isAdmin = (req) =>
+  req.user?.userType === "admin" &&
+  req.user?.isActive === true &&
+  req.user?.isVerified === true;
 
 userRoute.get("/users", async (req, res) => {
   if (!isAdmin(req)) {
@@ -76,6 +81,12 @@ userRoute.post(
     sendVerificationEmail,
   }),
 );
+
+userRoute.post(
+  "/users/admin",
+  createAdminManagedUserHandler({ db, hashpassword }),
+);
+
 userRoute.post("/verify-email", createVerificationHandler({ db }));
 
 userRoute.post("/resend-verification", async (req, res) => {
@@ -191,9 +202,29 @@ userRoute.delete("/users/:id", async (req, res) => {
       .json({ success: false, message: "Administrator access required." });
   }
   try {
+    const userId = Number(req.params.id);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res
+        .status(400)
+        .json({ success: false, message: "User not found." });
+    }
+    const [rider] = await db
+      .select({ riderId: schema.riders.riderId })
+      .from(schema.riders)
+      .where(eq(schema.riders.userId, userId))
+      .limit(1);
+    if (rider) {
+      const documents = await db
+        .select({ storageKey: schema.riderDocuments.storageKey })
+        .from(schema.riderDocuments)
+        .where(eq(schema.riderDocuments.riderId, rider.riderId));
+      for (const document of documents) {
+        await deleteStoredDocument(document.storageKey);
+      }
+    }
     const [user] = await db
       .delete(schema.users)
-      .where(eq(schema.users.userId, parseInt(req.params.id)))
+      .where(eq(schema.users.userId, userId))
       .returning();
 
     if (!user) {
@@ -203,7 +234,11 @@ userRoute.delete("/users/:id", async (req, res) => {
     }
     res.json({ success: true, message: "User deleted successfully" });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    console.error("Could not delete user account:", error);
+    res.status(500).json({
+      success: false,
+      message: "Could not delete the account and its stored documents.",
+    });
   }
 });
 

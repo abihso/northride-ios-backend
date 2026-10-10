@@ -1,17 +1,247 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { Router } from "express";
+import { randomUUID } from "node:crypto";
 import { createRiderDashboardHandler } from "../controllers/riderDashboard.js";
 import { createCompleteRiderOnboardingHandler } from "../controllers/riderOnboarding.js";
 import db from "../db/index.js";
 import * as schema from "../db/schema.js";
 import calculateDistance from "../utils/cal.js";
+import {
+  createDocumentUploadUrl,
+  createDocumentViewUrl,
+  deleteStoredDocument,
+  getUploadedDocumentMetadata,
+} from "../services/riderDocumentStorage.js";
 const riderRoute = Router();
-const isAdmin = (req) => req.user?.userType === "admin";
+const isAdmin = (req) =>
+  req.user?.userType === "admin" &&
+  req.user?.isActive === true &&
+  req.user?.isVerified === true;
+const allowedDocumentTypes = [
+  "ghana_card_front",
+  "ghana_card_back",
+  "driver_license_front",
+  "driver_license_back",
+  "roadworthiness",
+  "insurance",
+];
+const allowedDocumentContentTypes = ["image/jpeg", "image/png", "image/webp"];
+const maxDocumentSize = 5 * 1024 * 1024;
 
 riderRoute.post(
   "/riders/onboarding/complete",
   createCompleteRiderOnboardingHandler({ db }),
 );
+
+riderRoute.post("/riders/me/documents/upload-url", async (req, res) => {
+  if (
+    req.user?.userType !== "rider" ||
+    req.user?.isActive !== true ||
+    req.user?.isVerified !== true
+  ) {
+    return res
+      .status(403)
+      .json({ success: false, message: "A rider account is required." });
+  }
+  const { documentType, contentType, fileSize } = req.body || {};
+  if (
+    !allowedDocumentTypes.includes(documentType) ||
+    !allowedDocumentContentTypes.includes(contentType) ||
+    !Number.isInteger(fileSize) ||
+    fileSize < 1 ||
+    fileSize > maxDocumentSize
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: "Choose a supported document image up to 5 MB.",
+    });
+  }
+  try {
+    const [rider] = await db
+      .select({ riderId: schema.riders.riderId })
+      .from(schema.riders)
+      .where(eq(schema.riders.userId, req.user.userId))
+      .limit(1);
+    if (!rider) {
+      return res.status(409).json({
+        success: false,
+        message: "Complete rider setup before uploading documents.",
+      });
+    }
+    const key = `rider-documents/${req.user.userId}/${documentType}/${randomUUID()}`;
+    const uploadUrl = await createDocumentUploadUrl({
+      key,
+      contentType,
+      fileSize,
+    });
+    return res.json({ success: true, data: { uploadUrl, key } });
+  } catch (error) {
+    console.error("Could not create rider document upload URL:", error);
+    return res.status(503).json({
+      success: false,
+      message: "Private document storage is unavailable. Please try again.",
+    });
+  }
+});
+
+riderRoute.post("/riders/me/documents", async (req, res) => {
+  if (
+    req.user?.userType !== "rider" ||
+    req.user?.isActive !== true ||
+    req.user?.isVerified !== true
+  ) {
+    return res
+      .status(403)
+      .json({ success: false, message: "A rider account is required." });
+  }
+  const { documentType, key } = req.body || {};
+  if (!allowedDocumentTypes.includes(documentType) || typeof key !== "string") {
+    return res.status(400).json({
+      success: false,
+      message: "The uploaded document reference is invalid.",
+    });
+  }
+  const expectedPrefix = `rider-documents/${req.user.userId}/${documentType}/`;
+  const keyId = key.startsWith(expectedPrefix)
+    ? key.slice(expectedPrefix.length)
+    : "";
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(keyId)) {
+    return res.status(400).json({
+      success: false,
+      message: "The uploaded document reference is invalid.",
+    });
+  }
+
+  try {
+    const metadata = await getUploadedDocumentMetadata(key);
+    if (
+      !allowedDocumentContentTypes.includes(metadata.contentType) ||
+      !metadata.validImage ||
+      !Number.isInteger(metadata.fileSize) ||
+      metadata.fileSize < 1 ||
+      metadata.fileSize > maxDocumentSize
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "The uploaded document must be a valid JPG, PNG, or WebP image up to 5 MB.",
+      });
+    }
+    const [rider] = await db
+      .select({ riderId: schema.riders.riderId })
+      .from(schema.riders)
+      .where(eq(schema.riders.userId, req.user.userId))
+      .limit(1);
+    if (!rider) {
+      return res.status(409).json({
+        success: false,
+        message: "Complete rider setup before uploading documents.",
+      });
+    }
+
+    const [previousDocument] = await db
+      .select({ storageKey: schema.riderDocuments.storageKey })
+      .from(schema.riderDocuments)
+      .where(
+        and(
+          eq(schema.riderDocuments.riderId, rider.riderId),
+          eq(schema.riderDocuments.documentType, documentType),
+        ),
+      )
+      .limit(1);
+
+    await db.transaction(async (tx) => {
+      await tx
+        .delete(schema.riderDocuments)
+        .where(
+          and(
+            eq(schema.riderDocuments.riderId, rider.riderId),
+            eq(schema.riderDocuments.documentType, documentType),
+          ),
+        );
+      await tx
+        .insert(schema.riderDocuments)
+        .values({
+          riderId: rider.riderId,
+          documentType,
+          storageKey: key,
+          contentType: metadata.contentType,
+          fileSize: metadata.fileSize,
+        });
+      await tx
+        .update(schema.riders)
+        .set({ isApproved: false, isAvailable: false })
+        .where(eq(schema.riders.riderId, rider.riderId));
+    });
+
+    if (previousDocument && previousDocument.storageKey !== key) {
+      try {
+        await deleteStoredDocument(previousDocument.storageKey);
+      } catch (error) {
+        console.error("Could not remove replaced rider document:", error);
+      }
+    }
+    return res.status(201).json({ success: true });
+  } catch (error) {
+    console.error("Could not save uploaded rider document:", error);
+    return res.status(503).json({
+      success: false,
+      message: "Could not save the uploaded document. Please try again.",
+    });
+  }
+});
+
+riderRoute.get("/riders/:id/documents", async (req, res) => {
+  if (!isAdmin(req)) {
+    return res
+      .status(403)
+      .json({ success: false, message: "Administrator access required." });
+  }
+  const riderId = Number(req.params.id);
+  if (!Number.isInteger(riderId) || riderId <= 0) {
+    return res
+      .status(400)
+      .json({ success: false, message: "Rider not found." });
+  }
+  try {
+    const [rider] = await db
+      .select({ riderId: schema.riders.riderId })
+      .from(schema.riders)
+      .where(eq(schema.riders.riderId, riderId))
+      .limit(1);
+    if (!rider) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Rider not found." });
+    }
+    const documents = await db
+      .select({
+        documentId: schema.riderDocuments.documentId,
+        documentType: schema.riderDocuments.documentType,
+        storageKey: schema.riderDocuments.storageKey,
+        contentType: schema.riderDocuments.contentType,
+        fileSize: schema.riderDocuments.fileSize,
+      })
+      .from(schema.riderDocuments)
+      .where(eq(schema.riderDocuments.riderId, riderId));
+    const data = await Promise.all(
+      documents.map(async ({ storageKey, ...document }) => ({
+        ...document,
+        url: await createDocumentViewUrl({
+          key: storageKey,
+          contentType: document.contentType,
+        }),
+      })),
+    );
+    return res.json({ success: true, data });
+  } catch (error) {
+    console.error("Could not load rider application documents:", error);
+    return res.status(503).json({
+      success: false,
+      message: "Could not load rider documents. Please try again.",
+    });
+  }
+});
 
 riderRoute.patch("/riders/:id/payout-details", async (req, res) => {
   try {
@@ -137,15 +367,60 @@ riderRoute.patch("/riders/:id/review", async (req, res) => {
       message: "Rider not found.",
     });
   }
+  const reviewedDocumentIds = req.body.reviewedDocumentIds;
+  if (
+    req.body.isApproved &&
+    (!Array.isArray(reviewedDocumentIds) ||
+      reviewedDocumentIds.length !== allowedDocumentTypes.length ||
+      reviewedDocumentIds.some(
+        (documentId) =>
+          !Number.isInteger(documentId) || documentId <= 0,
+      ) ||
+      new Set(reviewedDocumentIds).size !== allowedDocumentTypes.length)
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: "Preview and confirm all six rider documents before approval.",
+    });
+  }
   try {
-    const [rider] = await db
-      .update(schema.riders)
-      .set({
-        isApproved: req.body.isApproved,
-        ...(req.body.isApproved ? {} : { isAvailable: false }),
-      })
-      .where(eq(schema.riders.riderId, riderId))
-      .returning();
+    const [rider] = await db.transaction(async (tx) => {
+      if (req.body.isApproved) {
+        const documents = await tx
+          .select({
+            documentId: schema.riderDocuments.documentId,
+            documentType: schema.riderDocuments.documentType,
+          })
+          .from(schema.riderDocuments)
+          .where(eq(schema.riderDocuments.riderId, riderId))
+          .for("update");
+        const currentIds = new Set(
+          documents.map((document) => document.documentId),
+        );
+        if (
+          documents.length !== allowedDocumentTypes.length ||
+          allowedDocumentTypes.some(
+            (documentType) =>
+              !documents.some((document) => document.documentType === documentType),
+          ) ||
+          reviewedDocumentIds.some((documentId) => !currentIds.has(documentId))
+        ) {
+          const error = new Error(
+            "Rider documents changed or are incomplete. Review them again before approval.",
+          );
+          error.status = 409;
+          throw error;
+        }
+      }
+      return tx
+        .update(schema.riders)
+        .set({
+          isApproved: req.body.isApproved,
+          ...(req.body.isApproved ? {} : { isAvailable: false }),
+        })
+        .where(eq(schema.riders.riderId, riderId))
+        .returning();
+    });
     if (!rider) {
       return res
         .status(404)
@@ -153,6 +428,12 @@ riderRoute.patch("/riders/:id/review", async (req, res) => {
     }
     return res.json({ success: true, data: rider });
   } catch (error) {
+    if (error.status === 409) {
+      return res.status(409).json({
+        success: false,
+        message: error.message,
+      });
+    }
     console.error("Could not update rider application review:", error);
     return res.status(500).json({
       success: false,

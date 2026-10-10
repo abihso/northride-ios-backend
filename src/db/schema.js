@@ -132,6 +132,20 @@ export const riders = pgTable("riders", {
   riders_vehicle_type_idx: index("riders_vehicle_type_idx").on(table.vehicleType),
 }));
 
+export const riderDocuments = pgTable("rider_documents", {
+  documentId: serial("document_id").primaryKey(),
+  riderId: integer("rider_id").notNull().references(() => riders.riderId, { onDelete: "cascade" }),
+  documentType: varchar("document_type", { length: 40 }).notNull(),
+  storageKey: varchar("storage_key", { length: 512 }).notNull().unique(),
+  contentType: varchar("content_type", { length: 40 }).notNull(),
+  fileSize: integer("file_size").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().$onUpdate(() => new Date()),
+}, (table) => ({
+  rider_documents_type_unique: unique("rider_documents_type_unique").on(table.riderId, table.documentType),
+  rider_documents_rider_idx: index("rider_documents_rider_idx").on(table.riderId),
+}));
+
 // =============================================
 // 3. SHOPS TABLE
 // =============================================

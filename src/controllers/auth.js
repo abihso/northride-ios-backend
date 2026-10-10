@@ -1,5 +1,6 @@
 import { and, eq, inArray } from "drizzle-orm";
 import * as schema from "../db/schema.js";
+import { deleteStoredDocument } from "../services/riderDocumentStorage.js";
 import { establishSession, toSafeUser } from "../utils/authUser.js";
 
 export const createLoginHandler = (passport) => (req, res, next) => {
@@ -61,7 +62,7 @@ export const logoutUser = async (req, res) => {
 };
 
 export const createDeleteAccountHandler =
-  ({ db }) =>
+  ({ db, deleteStoredDocumentFn = deleteStoredDocument }) =>
   async (req, res) => {
     if (req.user?.userType !== "rider") {
       return res.status(403).json({
@@ -139,6 +140,14 @@ export const createDeleteAccountHandler =
         }
       }
 
+      const storedDocuments = rider
+        ? await db
+            .select({ storageKey: schema.riderDocuments.storageKey })
+            .from(schema.riderDocuments)
+            .where(eq(schema.riderDocuments.riderId, rider.riderId))
+            .limit(6)
+        : [];
+
       await db.transaction(async (tx) => {
         if (rider) {
           await tx
@@ -164,6 +173,9 @@ export const createDeleteAccountHandler =
           await tx
             .delete(schema.riderLocations)
             .where(eq(schema.riderLocations.riderId, rider.riderId));
+          await tx
+            .delete(schema.riderDocuments)
+            .where(eq(schema.riderDocuments.riderId, rider.riderId));
         }
         await tx
           .delete(schema.userAddresses)
@@ -188,6 +200,18 @@ export const createDeleteAccountHandler =
           .where(eq(schema.users.userId, req.user.userId));
       });
 
+      const documentCleanup = await Promise.allSettled(
+        storedDocuments.map(({ storageKey }) =>
+          deleteStoredDocumentFn(storageKey),
+        ),
+      );
+      const failedCleanup = documentCleanup.filter(
+        (result) => result.status === "rejected",
+      );
+      for (const failure of failedCleanup) {
+        console.error("Could not remove stored rider document:", failure.reason);
+      }
+
       await new Promise((resolve, reject) => {
         req.logout((error) => (error ? reject(error) : resolve()));
       });
@@ -195,6 +219,13 @@ export const createDeleteAccountHandler =
         req.session.destroy((error) => (error ? reject(error) : resolve()));
       });
       res.clearCookie("connect.sid", { path: "/" });
+      if (failedCleanup.length) {
+        return res.status(500).json({
+          success: false,
+          message:
+            "Your account was deactivated, but some document images could not be removed. Please contact support.",
+        });
+      }
       return res.json({
         success: true,
         message:
