@@ -25,15 +25,20 @@ export const createRegistrationHandler =
       const role = registrationRole(userType);
       const email = normalizeIdentifier(req.body?.email);
       const emailOrPhone = checkEmailOrPhone(email);
+      const rawFullName = req.body?.fullName;
+      const fullName =
+        typeof rawFullName === "string" ? rawFullName.trim() || null : null;
       if (
         emailOrPhone === "Neither" ||
         typeof passwordHash !== "string" ||
-        passwordHash.length < 6
+        passwordHash.length < 6 ||
+        (rawFullName != null &&
+          (typeof rawFullName !== "string" || rawFullName.length > 100))
       ) {
         return res.status(400).json({
           success: false,
           message:
-            "Enter a valid email or phone number and a password of at least 6 characters.",
+            "Enter a valid email or phone number, a password of at least 6 characters, and a name no longer than 100 characters.",
         });
       }
       const [existingUser] = await db
@@ -53,7 +58,8 @@ export const createRegistrationHandler =
         .insert(users)
         .values({
           email,
-          phoneNumber: emailOrPhone === "Phone" ? email : "not set yet",
+          fullName,
+          phoneNumber: emailOrPhone === "Phone" ? email : null,
           passwordHash: hashpassword(passwordHash),
           userType: role,
           riderOnboardingCompleted: false,

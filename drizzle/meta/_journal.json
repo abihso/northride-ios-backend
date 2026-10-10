@@ -120,6 +120,13 @@
       "when": 1791638947311,
       "tag": "0016_rider_documents",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1791659450120,
+      "tag": "0017_strong_frog_thor",
+      "breakpoints": true
     }
   ]
 }

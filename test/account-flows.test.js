@@ -174,7 +174,7 @@ const registration = (db, overrides = {}) =>
     ...overrides,
   });
 
-test("registration persists rider/client choices and defaults legacy clients", async () => {
+test("registration persists optional names and account roles with unset profile fields as null", async () => {
   for (const [role, expected] of [
     ["rider", "rider"],
     ["customer", "customer"],
@@ -185,6 +185,7 @@ test("registration persists rider/client choices and defaults legacy clients", a
       email: "New.User@Example.Test",
       passwordHash: "password",
       userType: role,
+      fullName: "  North Rider  ",
       riderOnboardingCompleted: true,
       isVerified: true,
     });
@@ -193,11 +194,46 @@ test("registration persists rider/client choices and defaults legacy clients", a
     assert.equal(res.statusCode, 201);
     assert.equal(state.users[0].userType, expected);
     assert.equal(state.users[0].email, "new.user@example.test");
+    assert.equal(state.users[0].fullName, "North Rider");
+    assert.equal(state.users[0].phoneNumber, null);
     assert.equal(state.users[0].riderOnboardingCompleted, false);
     assert.equal(state.users[0].isVerified, false);
     assert.equal("passwordHash" in res.body.data, false);
     assert.equal(req.session.verification.userId, state.users[0].userId);
     assert.deepEqual(req.events, ["saved"]);
+  }
+});
+
+test("registration leaves an omitted name null and saves phone-based signups as phone", async () => {
+  const { db, state } = fixture();
+  const res = response();
+  await registration(db)(
+    request(null, {
+      email: "0551234567",
+      passwordHash: "password",
+    }),
+    res,
+  );
+
+  assert.equal(res.statusCode, 201);
+  assert.equal(state.users[0].fullName, null);
+  assert.equal(state.users[0].phoneNumber, "0551234567");
+});
+
+test("registration rejects non-string or oversized names before writing", async () => {
+  for (const fullName of [123, "x".repeat(101)]) {
+    const { db, state } = fixture();
+    const res = response();
+    await registration(db)(
+      request(null, {
+        email: "new@example.test",
+        passwordHash: "password",
+        fullName,
+      }),
+      res,
+    );
+    assert.equal(res.statusCode, 400);
+    assert.equal(state.users.length, 0);
   }
 });
 

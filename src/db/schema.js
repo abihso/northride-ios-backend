@@ -46,9 +46,9 @@ export const deliveryStatusEnum = pgEnum("delivery_status", ["pending", "searchi
 // =============================================
 export const users = pgTable("users", {
   userId: serial("user_id").primaryKey(),
-  fullName: varchar("full_name", { length: 100 }).default("not set yet"),
+  fullName: varchar("full_name", { length: 100 }),
   email: varchar("email", { length: 100 }).notNull().unique(),
-  phoneNumber: varchar("phone_number", { length: 20 }).default("not set yet"),
+  phoneNumber: varchar("phone_number", { length: 20 }),
   passwordHash: varchar("password_hash", { length: 255 }).notNull(),
   profilePicture: varchar("profile_picture", { length: 255 }).default("not set yet"),
   userType: userTypeEnum("user_type").default("customer"),
