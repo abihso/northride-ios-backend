@@ -55,6 +55,13 @@ export const createCompleteRiderOnboardingHandler =
           error.status = 403;
           throw error;
         }
+        if (!account.fullName?.trim()) {
+          const error = new Error(
+            "Enter your full name before starting rider onboarding.",
+          );
+          error.status = 400;
+          throw error;
+        }
         if (account.riderOnboardingCompleted) return account;
 
         await tx

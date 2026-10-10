@@ -9,6 +9,7 @@ import hashpassword from "../utils/hashpassword.js";
 import sendVerificationEmail from "../utils/sendEmail.js";
 import generateSixDigitCode from "../utils/sixdigits.js";
 import sendSms from "../utils/sms.js";
+import { createFullNameHandler } from "../controllers/profile.js";
 import { deleteStoredDocument } from "../services/riderDocumentStorage.js";
 import {
   createRegistrationHandler,
@@ -88,6 +89,11 @@ userRoute.post(
 );
 
 userRoute.post("/verify-email", createVerificationHandler({ db }));
+
+userRoute.patch(
+  "/users/me/full-name",
+  createFullNameHandler({ db }),
+);
 
 userRoute.post("/resend-verification", async (req, res) => {
   try {

@@ -36,7 +36,9 @@ backend environment and never use an `EXPO_PUBLIC_` prefix for it.
 
 Account registration accepts `userType: "customer"` (client) or `"rider"`;
 omitting the field preserves the existing client registration behavior. Other
-roles are rejected. Successful email/phone verification now signs the user in.
+roles are rejected. The mobile registration form does not collect a name;
+verified riders must save one with `PATCH /api/users/me/full-name` before
+starting onboarding. Successful email/phone verification now signs the user in.
 Verification, login, `GET /api/auth/me`, and rider onboarding completion return
 the authenticated account as `user`, including `riderOnboardingCompleted`.
 The session cookie must be included when restoring a session or completing

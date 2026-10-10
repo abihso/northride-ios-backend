@@ -11,6 +11,7 @@ import {
   createRegistrationHandler,
   createVerificationHandler,
 } from "../src/controllers/registration.js";
+import { createFullNameHandler } from "../src/controllers/profile.js";
 import { createCompleteRiderOnboardingHandler } from "../src/controllers/riderOnboarding.js";
 
 const dialect = new PgDialect();
@@ -19,6 +20,7 @@ const account = (userId, userType = "rider", extra = {}) => ({
   email: `user${userId}@example.test`,
   passwordHash: "private-password-hash",
   userType,
+  fullName: "North Rider",
   isActive: true,
   isVerified: true,
   riderOnboardingCompleted: false,
@@ -323,6 +325,51 @@ test("verification cannot authenticate a different account with another session'
   assert.ok(state.users.every((user) => !user.isVerified));
 });
 
+test("verified riders can save a required full name before onboarding", async () => {
+  const user = account(7, "rider");
+  user.fullName = null;
+  const { db, state } = fixture([user]);
+  const req = request(user, { fullName: "  North Rider  " });
+  const res = response();
+  await createFullNameHandler({ db })(req, res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(state.users[0].fullName, "North Rider");
+  assert.equal(res.body.user.fullName, "North Rider");
+  assert.equal("passwordHash" in res.body.user, false);
+});
+
+test("full-name update rejects blank or oversized names without changing the account", async () => {
+  for (const fullName of ["  ", "x".repeat(101)]) {
+    const user = account(7, "rider");
+    user.fullName = null;
+    const { db, state } = fixture([user]);
+    const res = response();
+    await createFullNameHandler({ db })(
+      request(user, { fullName }),
+      res,
+    );
+    assert.equal(res.statusCode, 400);
+    assert.equal(state.users[0].fullName, null);
+  }
+});
+
+test("full-name update requires an active, verified rider", async () => {
+  for (const user of [
+    account(7, "customer"),
+    account(8, "rider", { isVerified: false }),
+    account(9, "rider", { isActive: false }),
+  ]) {
+    const { db, state } = fixture([user]);
+    const res = response();
+    await createFullNameHandler({ db })(
+      request(user, { fullName: "North Rider" }),
+      res,
+    );
+    assert.equal(res.statusCode, 403);
+    assert.equal(state.users[0].fullName, "North Rider");
+  }
+});
+
 test("login and restoration return persisted onboarding state without exposing password hashes", async () => {
   const user = account(7, "rider", { riderOnboardingCompleted: true });
   const passport = {
@@ -442,6 +489,19 @@ test("clients, anonymous users, and incomplete profiles cannot complete rider on
     assert.equal(state.riders.length, 0);
     assert.ok(state.users.every((item) => !item.riderOnboardingCompleted));
   }
+});
+
+test("rider onboarding cannot start without a saved full name", async () => {
+  const user = account(7, "rider", { fullName: null });
+  const { db, state } = fixture([user]);
+  const res = response();
+  await createCompleteRiderOnboardingHandler({ db })(
+    request(user, profile),
+    res,
+  );
+  assert.equal(res.statusCode, 400);
+  assert.match(res.body.message, /full name/i);
+  assert.equal(state.riders.length, 0);
 });
 
 test("a failed profile write cannot mark onboarding complete", async () => {
