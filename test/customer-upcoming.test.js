@@ -99,6 +99,7 @@ test("upcoming tracking combines rides, send/receive deliveries, items, and live
 
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.data.rides[0].rider.fullName, "Rider One");
+  assert.equal(res.body.data.rides[0].rider.phoneNumber, "0200000000");
   assert.equal(res.body.data.rides[0].rider.currentLatitude, "5.6037");
   assert.equal(res.body.data.deliveries[0].deliveryType, "send");
   assert.equal(res.body.data.deliveries[0].items[0].itemName, "Parcel");

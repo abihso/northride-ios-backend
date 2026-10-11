@@ -25,6 +25,189 @@ const getRiderForUser = async (userId) => {
 // DELIVERY ROUTES
 // =============================================
 
+deliveryRouter.get("/admin/deliveries", async (req, res) => {
+  if (!isAdmin(req)) {
+    return res.status(403).json({
+      success: false,
+      message: "Administrator access required.",
+    });
+  }
+
+  try {
+    const limit = Math.max(1, Math.min(200, Number(req.query.limit) || 100));
+    const deliveries = await db
+      .select({
+        deliveryId: schema.deliveries.deliveryId,
+        deliveryReference: schema.deliveries.deliveryReference,
+        deliveryType: schema.deliveries.deliveryType,
+        status: schema.deliveries.status,
+        senderId: schema.deliveries.senderId,
+        riderId: schema.deliveries.riderId,
+        pickupAddress: schema.deliveries.pickupAddress,
+        dropoffAddress: schema.deliveries.dropoffAddress,
+        recipientName: schema.deliveries.recipientName,
+        totalAmount: schema.deliveries.totalAmount,
+        paymentStatus: schema.deliveries.paymentStatus,
+        createdAt: schema.deliveries.createdAt,
+      })
+      .from(schema.deliveries)
+      .orderBy(desc(schema.deliveries.createdAt))
+      .limit(limit);
+
+    return res.json({ success: true, data: deliveries });
+  } catch (error) {
+    console.error("Could not load admin delivery queue:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Could not load the delivery queue.",
+    });
+  }
+});
+
+deliveryRouter.patch("/deliveries/:id/assign-rider", async (req, res) => {
+  if (!isAdmin(req)) {
+    return res.status(403).json({
+      success: false,
+      message: "Administrator access required.",
+    });
+  }
+  const deliveryId = Number(req.params.id);
+  const { riderId } = req.body || {};
+  if (
+    !Number.isInteger(deliveryId) ||
+    deliveryId <= 0 ||
+    (riderId !== null && (!Number.isInteger(riderId) || riderId <= 0))
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: "A valid delivery and rider ID are required.",
+    });
+  }
+  try {
+    if (riderId !== null) {
+      const [rider] = await db
+        .select({ riderId: schema.riders.riderId })
+        .from(schema.riders)
+        .where(
+          and(
+            eq(schema.riders.riderId, riderId),
+            eq(schema.riders.isApproved, true),
+          ),
+        )
+        .limit(1);
+      if (!rider) {
+        return res.status(400).json({
+          success: false,
+          message: "Choose an approved rider.",
+        });
+      }
+    }
+    const [delivery] = await db
+      .update(schema.deliveries)
+      .set({ riderId, updatedAt: new Date() })
+      .where(eq(schema.deliveries.deliveryId, deliveryId))
+      .returning();
+    if (!delivery) {
+      return res.status(404).json({
+        success: false,
+        message: "Delivery not found.",
+      });
+    }
+    return res.json({ success: true, data: delivery });
+  } catch (error) {
+    console.error("Could not assign delivery rider:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Could not update the delivery assignment.",
+    });
+  }
+});
+
+deliveryRouter.delete("/deliveries/:id", async (req, res) => {
+  if (!isAdmin(req)) {
+    return res.status(403).json({
+      success: false,
+      message: "Administrator access required.",
+    });
+  }
+  const deliveryId = Number(req.params.id);
+  if (!Number.isInteger(deliveryId) || deliveryId <= 0) {
+    return res.status(400).json({
+      success: false,
+      message: "A valid delivery ID is required.",
+    });
+  }
+  try {
+    const [delivery] = await db
+      .select({
+        status: schema.deliveries.status,
+        paymentStatus: schema.deliveries.paymentStatus,
+        riderId: schema.deliveries.riderId,
+      })
+      .from(schema.deliveries)
+      .where(eq(schema.deliveries.deliveryId, deliveryId));
+    if (!delivery) {
+      return res.status(404).json({
+        success: false,
+        message: "Delivery not found.",
+      });
+    }
+    if (
+      delivery.status !== "pending" ||
+      delivery.paymentStatus !== "pending" ||
+      delivery.riderId !== null
+    ) {
+      return res.status(409).json({
+        success: false,
+        message:
+          "Only unassigned, pending, unpaid deliveries can be deleted. Cancel or update this delivery to preserve its operational and payment history.",
+      });
+    }
+    const [transaction] = await db
+      .select({ transactionId: schema.walletTransactions.transactionId })
+      .from(schema.walletTransactions)
+      .where(eq(schema.walletTransactions.deliveryId, deliveryId))
+      .limit(1);
+    const [earning] = await db
+      .select({ earningId: schema.riderEarnings.earningId })
+      .from(schema.riderEarnings)
+      .where(eq(schema.riderEarnings.deliveryId, deliveryId))
+      .limit(1);
+    if (transaction || earning) {
+      return res.status(409).json({
+        success: false,
+        message:
+          "This delivery has financial history and cannot be deleted. Update its status to preserve the record.",
+      });
+    }
+    const [deleted] = await db
+      .delete(schema.deliveries)
+      .where(
+        and(
+          eq(schema.deliveries.deliveryId, deliveryId),
+          eq(schema.deliveries.status, "pending"),
+          eq(schema.deliveries.paymentStatus, "pending"),
+          isNull(schema.deliveries.riderId),
+        ),
+      )
+      .returning({ deliveryId: schema.deliveries.deliveryId });
+    if (!deleted) {
+      return res.status(409).json({
+        success: false,
+        message:
+          "The delivery changed and is no longer eligible for deletion. Refresh the list.",
+      });
+    }
+    return res.json({ success: true, message: "Delivery deleted." });
+  } catch (error) {
+    console.error("Could not delete admin delivery:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Could not delete the delivery.",
+    });
+  }
+});
+
 // 1. Create a new delivery order
 deliveryRouter.post("/deliveries", async (req, res) => {
   try {
@@ -67,8 +250,25 @@ deliveryRouter.post("/deliveries", async (req, res) => {
         message: "Required delivery details are missing.",
       });
     }
+    if (
+      ["send", "receive"].includes(deliveryType) &&
+      (typeof recipientName !== "string" ||
+        typeof recipientPhone !== "string" ||
+        !recipientName.trim() ||
+        !recipientPhone.trim() ||
+        recipientName.trim().toLowerCase() === "not set yet" ||
+        recipientPhone.trim().toLowerCase() === "not set yet")
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "A recipient name and phone number are required.",
+      });
+    }
 
-    const quote = await getDeliveryQuote(req.body);
+    const quote = await getDeliveryQuote(
+      req.body,
+      deliveryType === "ride" ? "ride" : "delivery",
+    );
 
     const deliveryReference = `DEL-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
 

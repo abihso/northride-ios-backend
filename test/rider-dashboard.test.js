@@ -123,6 +123,43 @@ test("dashboard scopes rider data and only selects safe offer fields", async () 
   assert.equal("deliveryPin" in deliveryOfferQuery.selection, false);
 });
 
+test("active assigned rides include the passenger contact details for the rider", async () => {
+  const { db } = mockDb({
+    riders: [[rider]],
+    deliveries: [[]],
+    ride_bookings: [[
+      {
+        rideId: 13,
+        userId: 19,
+        riderId: rider.riderId,
+        status: "confirmed",
+      },
+    ]],
+    rider_earnings: [
+      [{ totalEarned: 0, totalPending: 0, totalPaid: 0 }],
+    ],
+    users: [[
+      {
+        userId: 19,
+        fullName: "Passenger One",
+        phoneNumber: "0240000000",
+      },
+    ]],
+  });
+  const res = response();
+
+  await createRiderDashboardHandler({ db })(
+    { user: { userId: 7 }, params: {} },
+    res,
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.data.activeRides[0].customer, {
+    fullName: "Passenger One",
+    phoneNumber: "0240000000",
+  });
+});
+
 test("rider offer preferences independently hide offer types", async () => {
   const { db } = mockDb({
     riders: [[rider]],

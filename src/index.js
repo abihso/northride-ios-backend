@@ -27,6 +27,7 @@ import shoproute from "./routes/shopRoute.js";
 import sysrouter from "./routes/systemConfigRoute.js";
 import ticketrouter from "./routes/ticketRoute.js";
 import userRoute from "./routes/usersRoute.js";
+import { requiresPhoneSetup } from "./utils/phoneSetupAccess.js";
 
 configDotenv();
 
@@ -179,14 +180,26 @@ app.use("/api", (req, res, next) => {
       (/^\/products\/\d+\/stock$/.test(path) ||
         /^\/support-tickets\/\d+$/.test(path) ||
         /^\/rider-earnings\/\d+\/pay$/.test(path))) ||
-    (req.method === "PUT" && /^\/system-config\/[^/]+$/.test(path));
+    (req.method === "PUT" &&
+      (/^\/system-config\/[^/]+$/.test(path) ||
+        path === "/admin/pricing-rates"));
+  const isAdminRead =
+    req.method === "GET" &&
+    ["/system-config", "/admin/rides", "/admin/pricing-rates"].includes(path);
   if (
-    (isAdminMutation || (req.method === "GET" && path === "/system-config")) &&
+    (isAdminMutation || isAdminRead) &&
     req.user?.userType !== "admin"
   ) {
     return res
       .status(403)
       .json({ success: false, message: "Administrator access required." });
+  }
+  if (requiresPhoneSetup(req)) {
+    return res.status(403).json({
+      success: false,
+      code: "PHONE_NUMBER_REQUIRED",
+      message: "Add a phone number to your account before continuing.",
+    });
   }
   return next();
 });

@@ -300,6 +300,46 @@ riderSettingsRoute.get("/users/me/data-export", async (req, res) => {
             .orderBy(desc(schema.deliveries.createdAt))
             .limit(500),
         ])
+      : req.user.userType === "customer"
+        ? await Promise.all([
+            Promise.resolve([]),
+            db
+              .select({
+                rideId: schema.rideBookings.rideId,
+                rideReference: schema.rideBookings.rideReference,
+                rideType: schema.rideBookings.rideType,
+                bookingType: schema.rideBookings.bookingType,
+                status: schema.rideBookings.status,
+                pickupAddress: schema.rideBookings.pickupAddress,
+                dropoffAddress: schema.rideBookings.dropoffAddress,
+                estimatedPrice: schema.rideBookings.estimatedPrice,
+                actualPrice: schema.rideBookings.actualPrice,
+                bookedAt: schema.rideBookings.bookedAt,
+                scheduledTime: schema.rideBookings.scheduledTime,
+              })
+              .from(schema.rideBookings)
+              .where(eq(schema.rideBookings.userId, req.user.userId))
+              .orderBy(desc(schema.rideBookings.bookedAt))
+              .limit(500),
+            db
+              .select({
+                deliveryId: schema.deliveries.deliveryId,
+                deliveryReference: schema.deliveries.deliveryReference,
+                deliveryType: schema.deliveries.deliveryType,
+                status: schema.deliveries.status,
+                pickupAddress: schema.deliveries.pickupAddress,
+                dropoffAddress: schema.deliveries.dropoffAddress,
+                deliveryFee: schema.deliveries.deliveryFee,
+                totalAmount: schema.deliveries.totalAmount,
+                paymentStatus: schema.deliveries.paymentStatus,
+                createdAt: schema.deliveries.createdAt,
+                deliveredAt: schema.deliveries.deliveredAt,
+              })
+              .from(schema.deliveries)
+              .where(eq(schema.deliveries.senderId, req.user.userId))
+              .orderBy(desc(schema.deliveries.createdAt))
+              .limit(500),
+          ])
       : [[], [], []];
 
     return res.json({

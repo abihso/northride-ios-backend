@@ -4,6 +4,7 @@ import { createCustomerUpcomingHandler } from "../controllers/customerUpcoming.j
 import db from "../db/index.js";
 import * as schema from "../db/schema.js";
 import { findActiveRideRequest } from "../utils/activeRideRequest.js";
+import { getDeliveryQuote } from "./mapsRoute.js";
 
 const ridesbookroute = Router();
 const isAdmin = (req) => req.user?.userType === "admin";
@@ -20,6 +21,54 @@ ridesbookroute.get(
   "/users/:userId/upcoming",
   createCustomerUpcomingHandler({ db }),
 );
+
+ridesbookroute.get("/admin/rides", async (req, res) => {
+  if (!isAdmin(req)) {
+    return res.status(403).json({
+      success: false,
+      message: "Administrator access required.",
+    });
+  }
+
+  try {
+    const limit = Math.max(1, Math.min(200, Number(req.query.limit) || 100));
+    const rides = await db
+      .select({
+        rideId: schema.rideBookings.rideId,
+        rideReference: schema.rideBookings.rideReference,
+        rideType: schema.rideBookings.rideType,
+        bookingType: schema.rideBookings.bookingType,
+        userId: schema.rideBookings.userId,
+        passengerName: schema.users.fullName,
+        passengerEmail: schema.users.email,
+        passengerPhone: schema.users.phoneNumber,
+        riderId: schema.rideBookings.riderId,
+        pickupAddress: schema.rideBookings.pickupAddress,
+        dropoffAddress: schema.rideBookings.dropoffAddress,
+        estimatedDistance: schema.rideBookings.estimatedDistance,
+        estimatedPrice: schema.rideBookings.estimatedPrice,
+        paymentMethod: schema.rideBookings.paymentMethod,
+        paymentStatus: schema.rideBookings.paymentStatus,
+        status: schema.rideBookings.status,
+        bookedAt: schema.rideBookings.bookedAt,
+      })
+      .from(schema.rideBookings)
+      .leftJoin(
+        schema.users,
+        eq(schema.rideBookings.userId, schema.users.userId),
+      )
+      .orderBy(desc(schema.rideBookings.bookedAt))
+      .limit(limit);
+
+    return res.json({ success: true, data: rides });
+  } catch (error) {
+    console.error("Could not load admin ride queue:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Could not load the ride queue.",
+    });
+  }
+});
 
 ridesbookroute.post("/rides/:id/accept", async (req, res) => {
   try {
@@ -173,7 +222,32 @@ ridesbookroute.post("/rides", async (req, res) => {
       paymentMethod, // Enum -> ["cash", "card", "wallet", "bank_transfer"] (NOT NULL)
       scheduledTime, // timestamp with time zone, optional (used when bookingType = "scheduled")
       tollCharges, // decimal(10, 2) (default: "0.00")
+      estimatedDistance,
+      estimatedDuration,
+      estimatedPrice,
     } = req.body;
+
+    if (
+      !pickupAddress ||
+      !dropoffAddress ||
+      !Number.isFinite(Number(pickupLatitude)) ||
+      !Number.isFinite(Number(pickupLongitude)) ||
+      !Number.isFinite(Number(dropoffLatitude)) ||
+      !Number.isFinite(Number(dropoffLongitude)) ||
+      !["cash", "card", "wallet", "bank_transfer"].includes(paymentMethod)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid ride locations and payment method are required.",
+      });
+    }
+
+    const quote = await getDeliveryQuote({
+      pickupLatitude,
+      pickupLongitude,
+      dropoffLatitude,
+      dropoffLongitude,
+    }, "ride");
 
     // Generate ride reference
     const rideReference = `RD-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
@@ -199,6 +273,9 @@ ridesbookroute.post("/rides", async (req, res) => {
           pickupAddress,
           pickupLatitude,
           pickupLongitude,
+          estimatedDistance: quote.distanceKm ?? estimatedDistance,
+          estimatedDuration,
+          estimatedPrice: quote.totalAmount ?? estimatedPrice,
           pickupInstructions,
           pickupLandmark,
           dropoffAddress,

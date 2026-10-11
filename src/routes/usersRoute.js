@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { Router } from "express";
 import { createAdminManagedUserHandler } from "../controllers/adminUsers.js";
 import db from "../db/index.js";
@@ -15,7 +15,11 @@ import {
   createRegistrationHandler,
   createVerificationHandler,
 } from "../controllers/registration.js";
-import { normalizeIdentifier, saveSession } from "../utils/authUser.js";
+import {
+  normalizeIdentifier,
+  saveSession,
+  toSafeUser,
+} from "../utils/authUser.js";
 const userRoute = Router();
 
 const isAdmin = (req) =>
@@ -87,6 +91,67 @@ userRoute.post(
   "/users/admin",
   createAdminManagedUserHandler({ db, hashpassword }),
 );
+
+userRoute.patch("/users/me/phone-number", async (req, res) => {
+  if (
+    !["customer", "rider"].includes(req.user?.userType) ||
+    req.user?.isActive !== true ||
+    req.user?.isVerified !== true
+  ) {
+    return res.status(403).json({
+      success: false,
+      message: "An active, verified customer or rider account is required.",
+    });
+  }
+
+  const phoneNumber =
+    typeof req.body?.phoneNumber === "string"
+      ? req.body.phoneNumber.trim()
+      : "";
+  if (
+    phoneNumber.length > 20 ||
+    checkEmailOrPhone(phoneNumber) !== "Phone"
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: "Enter a valid phone number.",
+    });
+  }
+
+  try {
+    const [existingUser] = await db
+      .select({ userId: schema.users.userId })
+      .from(schema.users)
+      .where(eq(schema.users.phoneNumber, phoneNumber))
+      .limit(1);
+    if (existingUser && existingUser.userId !== req.user.userId) {
+      return res.status(409).json({
+        success: false,
+        message: "That phone number is already linked to another account.",
+      });
+    }
+
+    const [user] = await db
+      .update(schema.users)
+      .set({ phoneNumber, updatedAt: new Date() })
+      .where(eq(schema.users.userId, req.user.userId))
+      .returning();
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User account not found.",
+      });
+    }
+    req.user.phoneNumber = user.phoneNumber;
+    return res.json({ success: true, user: toSafeUser(user) });
+  } catch (error) {
+    console.error("Could not save account phone number:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Could not save your phone number.",
+    });
+  }
+});
 
 userRoute.post("/verify-email", createVerificationHandler({ db }));
 
@@ -172,10 +237,67 @@ userRoute.put("/users/:id", async (req, res) => {
   try {
     const { fullName, email, phoneNumber, profilePicture, userType, isActive } =
       req.body;
+    if (
+      admin &&
+      (typeof fullName !== "string" ||
+        !fullName.trim() ||
+        fullName.trim().length > 100 ||
+        typeof email !== "string" ||
+        checkEmailOrPhone(email.trim()) === "Neither" ||
+        (phoneNumber !== null &&
+          (typeof phoneNumber !== "string" || phoneNumber.length > 20)) ||
+        !["customer", "rider", "admin"].includes(userType) ||
+        typeof isActive !== "boolean")
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Enter valid account details.",
+      });
+    }
+    if (
+      admin &&
+      userId === req.user.userId &&
+      (userType !== "admin" || !isActive)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "You cannot disable or demote your own administrator account.",
+      });
+    }
+    if (admin) {
+      const [target] = await db
+        .select({ userType: schema.users.userType })
+        .from(schema.users)
+        .where(eq(schema.users.userId, userId))
+        .limit(1);
+      if (
+        target?.userType === "admin" &&
+        (userType !== "admin" || !isActive)
+      ) {
+        const activeAdmins = await db
+          .select({ userId: schema.users.userId })
+          .from(schema.users)
+          .where(
+            and(
+              eq(schema.users.userType, "admin"),
+              eq(schema.users.isActive, true),
+            ),
+          );
+        if (activeAdmins.length <= 1) {
+          return res.status(409).json({
+            success: false,
+            message: "The last active administrator cannot be disabled.",
+          });
+        }
+      }
+    }
     const updateData = {
-      fullName,
-      email,
-      phoneNumber,
+      fullName: typeof fullName === "string" ? fullName.trim() : fullName,
+      email: typeof email === "string" ? email.trim().toLowerCase() : email,
+      phoneNumber:
+        typeof phoneNumber === "string" && !phoneNumber.trim()
+          ? null
+          : phoneNumber,
       profilePicture,
       updatedAt: new Date(),
     };
@@ -214,11 +336,121 @@ userRoute.delete("/users/:id", async (req, res) => {
         .status(400)
         .json({ success: false, message: "User not found." });
     }
+    if (userId === req.user.userId) {
+      return res.status(400).json({
+        success: false,
+        message: "You cannot delete your own administrator account.",
+      });
+    }
+    const [target] = await db
+      .select({
+        userType: schema.users.userType,
+        isActive: schema.users.isActive,
+      })
+      .from(schema.users)
+      .where(eq(schema.users.userId, userId))
+      .limit(1);
+    if (!target) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found.",
+      });
+    }
+    if (target.userType === "admin" && target.isActive) {
+      const activeAdmins = await db
+        .select({ userId: schema.users.userId })
+        .from(schema.users)
+        .where(
+          and(
+            eq(schema.users.userType, "admin"),
+            eq(schema.users.isActive, true),
+          ),
+        );
+      if (activeAdmins.length <= 1) {
+        return res.status(409).json({
+          success: false,
+          message: "The last active administrator cannot be deleted.",
+        });
+      }
+    }
     const [rider] = await db
       .select({ riderId: schema.riders.riderId })
       .from(schema.riders)
       .where(eq(schema.riders.userId, userId))
       .limit(1);
+    const [order] = await db
+      .select({ orderId: schema.orders.orderId })
+      .from(schema.orders)
+      .where(eq(schema.orders.userId, userId))
+      .limit(1);
+    const [delivery] = await db
+      .select({ deliveryId: schema.deliveries.deliveryId })
+      .from(schema.deliveries)
+      .where(eq(schema.deliveries.senderId, userId))
+      .limit(1);
+    const [ride] = await db
+      .select({ rideId: schema.rideBookings.rideId })
+      .from(schema.rideBookings)
+      .where(eq(schema.rideBookings.userId, userId))
+      .limit(1);
+    const [assignedOrder] = rider
+      ? await db
+          .select({ orderId: schema.orders.orderId })
+          .from(schema.orders)
+          .where(eq(schema.orders.riderId, rider.riderId))
+          .limit(1)
+      : [];
+    const [assignedDelivery] = rider
+      ? await db
+          .select({ deliveryId: schema.deliveries.deliveryId })
+          .from(schema.deliveries)
+          .where(eq(schema.deliveries.riderId, rider.riderId))
+          .limit(1)
+      : [];
+    const [assignedRide] = rider
+      ? await db
+          .select({ rideId: schema.rideBookings.rideId })
+          .from(schema.rideBookings)
+          .where(eq(schema.rideBookings.riderId, rider.riderId))
+          .limit(1)
+      : [];
+    const [wallet] = await db
+      .select({
+        walletId: schema.wallets.walletId,
+        balance: schema.wallets.balance,
+      })
+      .from(schema.wallets)
+      .where(eq(schema.wallets.userId, userId))
+      .limit(1);
+    const [walletTransaction] = await db
+      .select({ transactionId: schema.walletTransactions.transactionId })
+      .from(schema.walletTransactions)
+      .where(eq(schema.walletTransactions.userId, userId))
+      .limit(1);
+    const [riderEarning] = rider
+      ? await db
+          .select({ earningId: schema.riderEarnings.earningId })
+          .from(schema.riderEarnings)
+          .where(eq(schema.riderEarnings.riderId, rider.riderId))
+          .limit(1)
+      : [];
+    if (
+      order ||
+      delivery ||
+      ride ||
+      assignedOrder ||
+      assignedDelivery ||
+      assignedRide ||
+      walletTransaction ||
+      (wallet && Number(wallet.balance || 0) !== 0) ||
+      riderEarning
+    ) {
+      return res.status(409).json({
+        success: false,
+        message:
+          "This account has order, delivery, ride, wallet, or rider-earning history and cannot be deleted. Disable the account instead to preserve its records.",
+      });
+    }
     if (rider) {
       const documents = await db
         .select({ storageKey: schema.riderDocuments.storageKey })

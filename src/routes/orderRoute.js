@@ -1,9 +1,12 @@
 import crypto from "crypto";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { Router } from "express";
 import db from "../db/index.js";
 import * as schema from "../db/schema.js";
-import { findActiveRequest } from "../utils/activeRideRequest.js";
+import {
+  findActiveRequest,
+  findActiveRideRequest,
+} from "../utils/activeRideRequest.js";
 import { getDeliveryQuote } from "./mapsRoute.js";
 
 const orderroute = Router();
@@ -154,6 +157,24 @@ orderroute.patch("/orders/:id/status", async (req, res) => {
   try {
     const { status } = req.body;
     const orderId = parseInt(req.params.id);
+    if (
+      ![
+        "pending",
+        "confirmed",
+        "preparing",
+        "ready",
+        "picked_up",
+        "in_transit",
+        "delivered",
+        "cancelled",
+        "rejected",
+      ].includes(status)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "A valid order status is required.",
+      });
+    }
 
     let updateData = { status };
     const timestamp = new Date();
@@ -209,11 +230,40 @@ orderroute.patch("/orders/:id/assign-rider", async (req, res) => {
   }
   try {
     const { riderId } = req.body;
+    const orderId = Number(req.params.id);
+    if (
+      !Number.isInteger(orderId) ||
+      orderId <= 0 ||
+      (riderId !== null && (!Number.isInteger(riderId) || riderId <= 0))
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "A valid order and rider ID are required.",
+      });
+    }
+    if (riderId !== null) {
+      const [rider] = await db
+        .select({ riderId: schema.riders.riderId })
+        .from(schema.riders)
+        .where(
+          and(
+            eq(schema.riders.riderId, riderId),
+            eq(schema.riders.isApproved, true),
+          ),
+        )
+        .limit(1);
+      if (!rider) {
+        return res.status(400).json({
+          success: false,
+          message: "Choose an approved rider.",
+        });
+      }
+    }
 
     const [order] = await db
       .update(schema.orders)
       .set({ riderId })
-      .where(eq(schema.orders.orderId, parseInt(req.params.id)))
+      .where(eq(schema.orders.orderId, orderId))
       .returning();
 
     if (!order) {
@@ -224,6 +274,92 @@ orderroute.patch("/orders/:id/assign-rider", async (req, res) => {
     res.json({ success: true, data: order });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+orderroute.delete("/orders/:id", async (req, res) => {
+  if (req.user?.userType !== "admin") {
+    return res.status(403).json({
+      success: false,
+      message: "Administrator access required.",
+    });
+  }
+  const orderId = Number(req.params.id);
+  if (!Number.isInteger(orderId) || orderId <= 0) {
+    return res.status(400).json({
+      success: false,
+      message: "A valid order ID is required.",
+    });
+  }
+  try {
+    const [order] = await db
+      .select({
+        status: schema.orders.status,
+        paymentStatus: schema.orders.paymentStatus,
+        riderId: schema.orders.riderId,
+      })
+      .from(schema.orders)
+      .where(eq(schema.orders.orderId, orderId));
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found.",
+      });
+    }
+    if (
+      order.status !== "pending" ||
+      order.paymentStatus !== "pending" ||
+      order.riderId !== null
+    ) {
+      return res.status(409).json({
+        success: false,
+        message:
+          "Only unassigned, pending, unpaid orders can be deleted. Cancel or update this order to preserve its operational and payment history.",
+      });
+    }
+    const [transaction] = await db
+      .select({ transactionId: schema.walletTransactions.transactionId })
+      .from(schema.walletTransactions)
+      .where(eq(schema.walletTransactions.orderId, orderId))
+      .limit(1);
+    const [earning] = await db
+      .select({ earningId: schema.riderEarnings.earningId })
+      .from(schema.riderEarnings)
+      .where(eq(schema.riderEarnings.orderId, orderId))
+      .limit(1);
+    if (transaction || earning) {
+      return res.status(409).json({
+        success: false,
+        message:
+          "This order has financial history and cannot be deleted. Update its status to preserve the record.",
+      });
+    }
+
+    const [deleted] = await db
+      .delete(schema.orders)
+      .where(
+        and(
+          eq(schema.orders.orderId, orderId),
+          eq(schema.orders.status, "pending"),
+          eq(schema.orders.paymentStatus, "pending"),
+          isNull(schema.orders.riderId),
+        ),
+      )
+      .returning({ orderId: schema.orders.orderId });
+    if (!deleted) {
+      return res.status(409).json({
+        success: false,
+        message:
+          "The order changed and is no longer eligible for deletion. Refresh the list.",
+      });
+    }
+    return res.json({ success: true, message: "Order deleted." });
+  } catch (error) {
+    console.error("Could not delete admin order:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Could not delete the order.",
+    });
   }
 });
 
@@ -250,6 +386,17 @@ const createPaidDelivery = async (transaction) => {
 
   if (!details || !Number.isInteger(userId) || !reference) {
     throw new Error("Payment metadata is incomplete.");
+  }
+  if (
+    ["send", "receive"].includes(details.deliveryType) &&
+    (typeof details.recipientName !== "string" ||
+      typeof details.recipientPhone !== "string" ||
+      !details.recipientName.trim() ||
+      !details.recipientPhone.trim() ||
+      details.recipientName.trim().toLowerCase() === "not set yet" ||
+      details.recipientPhone.trim().toLowerCase() === "not set yet")
+  ) {
+    throw new Error("Delivery recipient name and phone number are missing.");
   }
   if (
     transaction.currency !== "GHS" ||
@@ -329,14 +476,192 @@ const createPaidDelivery = async (transaction) => {
   return existingDelivery;
 };
 
+const createPaidRide = async (transaction) => {
+  const metadata = transaction.metadata || {};
+  const details = metadata.ride;
+  const userId = Number(metadata.userId);
+  const reference = transaction.reference;
+  const [existingRide] = reference
+    ? await db
+        .select()
+        .from(schema.rideBookings)
+        .where(eq(schema.rideBookings.rideReference, reference))
+    : [];
+
+  if (existingRide) {
+    if (existingRide.userId !== userId) {
+      throw new Error("Payment reference belongs to another user.");
+    }
+    return existingRide;
+  }
+  if (!details || !Number.isInteger(userId) || !reference) {
+    throw new Error("Ride payment metadata is incomplete.");
+  }
+  if (
+    transaction.currency !== "GHS" ||
+    !Number.isInteger(Number(metadata.expectedAmount)) ||
+    Number(transaction.amount) !== Number(metadata.expectedAmount)
+  ) {
+    throw new Error("Payment amount does not match the ride fare.");
+  }
+
+  const result = await db.transaction(async (tx) => {
+    await tx
+      .select({ userId: schema.users.userId })
+      .from(schema.users)
+      .where(eq(schema.users.userId, userId))
+      .for("update")
+      .limit(1);
+    const activeRide = await findActiveRideRequest(tx, userId);
+    if (activeRide) return { activeRide };
+
+    const [ride] = await tx
+      .insert(schema.rideBookings)
+      .values({
+        userId,
+        rideReference: reference,
+        rideType: details.rideType || "standard",
+        bookingType: details.bookingType || "now",
+        pickupAddress: details.pickupAddress,
+        pickupLatitude: details.pickupLatitude,
+        pickupLongitude: details.pickupLongitude,
+        dropoffAddress: details.dropoffAddress,
+        dropoffLatitude: details.dropoffLatitude,
+        dropoffLongitude: details.dropoffLongitude,
+        estimatedDistance: details.estimatedDistance,
+        estimatedDuration: details.estimatedDuration,
+        estimatedPrice: details.estimatedPrice,
+        paymentMethod: "card",
+        paymentStatus: "paid",
+        paymentReference: reference,
+        status: "pending",
+      })
+      .onConflictDoNothing({ target: schema.rideBookings.rideReference })
+      .returning();
+    return { ride };
+  });
+
+  if (result.activeRide) {
+    const error = new Error(
+      "You already have a ride in progress. Complete or cancel it before booking another ride.",
+    );
+    error.status = 409;
+    error.code = "ACTIVE_RIDE_EXISTS";
+    throw error;
+  }
+  if (result.ride) return result.ride;
+
+  const [conflictingRide] = await db
+    .select()
+    .from(schema.rideBookings)
+    .where(eq(schema.rideBookings.rideReference, reference));
+  if (!conflictingRide || conflictingRide.userId !== userId) {
+    throw new Error("Unable to record verified ride payment.");
+  }
+  return conflictingRide;
+};
+
 // Initialize Paystack Payment
 orderroute.post("/payments/initialize", async (req, res) => {
   try {
-    const { delivery } = req.body;
-    if (!process.env.PAYSTACK_SECRET_KEY || !delivery) {
+    const { delivery, ride } = req.body;
+    if (
+      !process.env.PAYSTACK_SECRET_KEY ||
+      Boolean(delivery) === Boolean(ride)
+    ) {
       return res.status(400).json({
         success: false,
         message: "Payment configuration or delivery details are invalid.",
+      });
+    }
+    if (ride) {
+      if (
+        !ride.pickupAddress ||
+        !ride.dropoffAddress ||
+        !["cash", "card"].includes(ride.paymentMethod)
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Valid ride details and payment method are required.",
+        });
+      }
+      const activeRide = await findActiveRideRequest(db, req.user.userId);
+      if (activeRide) {
+        return res.status(409).json({
+          success: false,
+          code: "ACTIVE_RIDE_EXISTS",
+          message:
+            "You already have a ride in progress. Complete or cancel it before booking another ride.",
+        });
+      }
+      const quote = await getDeliveryQuote(ride, "ride");
+      const amount = Math.round(Number(quote.totalAmount) * 100);
+      const verifiedRide = {
+        ...ride,
+        estimatedDistance: quote.distanceKm,
+        estimatedDuration: Math.ceil(
+          Number(quote.directions.routes[0]?.legs[0]?.duration?.value ?? 0) /
+            60,
+        ),
+        estimatedPrice: quote.totalAmount,
+        paymentMethod: "card",
+      };
+      const callbackUrl =
+        process.env.PAYSTACK_CALLBACK_URL ||
+        new URL(
+          "/api/payments/callback",
+          `${req.protocol}://${req.get("host")}`,
+        ).toString();
+      const paystackResponse = await fetch(
+        "https://api.paystack.co/transaction/initialize",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            email: req.user.email,
+            amount,
+            currency: "GHS",
+            callback_url: callbackUrl,
+            metadata: {
+              userId: req.user.userId,
+              expectedAmount: amount,
+              ride: verifiedRide,
+            },
+          }),
+        },
+      );
+      const responseData = await paystackResponse.json();
+      if (!paystackResponse.ok || !responseData.status) {
+        return res.status(400).json({
+          success: false,
+          message: responseData.message,
+        });
+      }
+      return res.json({
+        success: true,
+        data: {
+          authorization_url: responseData.data.authorization_url,
+          reference: responseData.data.reference,
+          callback_url: callbackUrl,
+        },
+      });
+    }
+
+    if (
+      ["send", "receive"].includes(delivery.deliveryType) &&
+      (typeof delivery.recipientName !== "string" ||
+        !delivery.recipientName.trim() ||
+        typeof delivery.recipientPhone !== "string" ||
+        !delivery.recipientPhone.trim() ||
+        delivery.recipientName.trim().toLowerCase() === "not set yet" ||
+        delivery.recipientPhone.trim().toLowerCase() === "not set yet")
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "A recipient name and phone number are required.",
       });
     }
     const activeRequest = ["ride", "send", "receive"].includes(
@@ -351,7 +676,10 @@ orderroute.post("/payments/initialize", async (req, res) => {
         message: `You already have an active ${delivery.deliveryType} request. Complete or cancel it before booking another ${delivery.deliveryType} request.`,
       });
     }
-    const quote = await getDeliveryQuote(delivery);
+    const quote = await getDeliveryQuote(
+      delivery,
+      delivery.deliveryType === "ride" ? "ride" : "delivery",
+    );
     const amount = Math.round(Number(quote.totalAmount) * 100);
     const verifiedDelivery = {
       ...delivery,
@@ -441,7 +769,11 @@ orderroute.post("/payments/webhook", async (req, res) => {
 
     const event = req.body;
     if (event.event === "charge.success" && event.data?.status === "success") {
-      await createPaidDelivery(event.data);
+      if (event.data.metadata?.ride) {
+        await createPaidRide(event.data);
+      } else {
+        await createPaidDelivery(event.data);
+      }
     }
 
     res.sendStatus(200);
@@ -486,11 +818,13 @@ orderroute.post("/payments/verify", async (req, res) => {
       });
     }
 
-    const delivery = await createPaidDelivery(result.data);
+    const paymentData = result.data.metadata?.ride
+      ? { ride: await createPaidRide(result.data) }
+      : { delivery: await createPaidDelivery(result.data) };
     return res.json({
       success: true,
       message: "Payment verified successfully",
-      data: { delivery },
+      data: paymentData,
     });
   } catch (error) {
     res.status(error.status || 500).json({

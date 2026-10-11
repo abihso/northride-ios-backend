@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { calculateFare, getPerKmRate, isPricingService } from "../utils/pricing.js";
 
 const mapsRoute = Router();
 
@@ -53,7 +54,10 @@ export const getDirections = async (origin, destination) => {
   return googleRequest(url);
 };
 
-export const getDeliveryQuote = async (delivery) => {
+export const getDeliveryQuote = async (delivery, service = "delivery") => {
+  if (!isPricingService(service)) {
+    throw new Error("Unsupported pricing service.");
+  }
   const origin = coordinatePair(
     delivery.pickupLatitude,
     delivery.pickupLongitude,
@@ -68,20 +72,27 @@ export const getDeliveryQuote = async (delivery) => {
     throw new Error("Unable to calculate delivery distance.");
   }
   const distanceKm = meters / 1000;
+  const fare = calculateFare(distanceKm, await getPerKmRate(service));
   return {
     directions,
     distanceKm: distanceKm.toFixed(2),
-    totalAmount: (5 + distanceKm * 2.5).toFixed(2),
+    ...fare,
   };
 };
 
 mapsRoute.get("/maps/directions", async (req, res) => {
   try {
-    const { origin, destination } = req.query;
+    const { origin, destination, service } = req.query;
     if (typeof origin !== "string" || typeof destination !== "string") {
       return res.status(400).json({
         success: false,
         message: "Origin and destination are required.",
+      });
+    }
+    if (service !== undefined && (typeof service !== "string" || !isPricingService(service))) {
+      return res.status(400).json({
+        success: false,
+        message: "Pricing service must be ride or delivery.",
       });
     }
     const parseCoordinates = (value) => {
@@ -91,12 +102,25 @@ mapsRoute.get("/maps/directions", async (req, res) => {
       }
       return coordinatePair(parts[0], parts[1]);
     };
-    return res.json(
-      await getDirections(
-        parseCoordinates(origin),
-        parseCoordinates(destination),
-      ),
-    );
+    const parsedOrigin = parseCoordinates(origin);
+    const parsedDestination = parseCoordinates(destination);
+    if (!service) {
+      return res.json(await getDirections(parsedOrigin, parsedDestination));
+    }
+    const quote = await getDeliveryQuote({
+      pickupLatitude: parsedOrigin.split(",")[0],
+      pickupLongitude: parsedOrigin.split(",")[1],
+      dropoffLatitude: parsedDestination.split(",")[0],
+      dropoffLongitude: parsedDestination.split(",")[1],
+    }, service);
+    return res.json({
+      ...quote.directions,
+      pricing: {
+        baseFare: quote.baseFare,
+        perKmRate: quote.perKmRate,
+        totalAmount: quote.totalAmount,
+      },
+    });
   } catch (error) {
     return res
       .status(error.status || 502)

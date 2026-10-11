@@ -442,6 +442,82 @@ riderRoute.patch("/riders/:id/review", async (req, res) => {
   }
 });
 
+riderRoute.put("/riders/:id/admin", async (req, res) => {
+  if (!isAdmin(req)) {
+    return res.status(403).json({
+      success: false,
+      message: "Administrator access required.",
+    });
+  }
+
+  const riderId = Number(req.params.id);
+  const { vehicleType, vehicleModel, vehicleColor, vehiclePlateNumber, licenseNumber } =
+    req.body || {};
+  const allowedVehicleTypes = [
+    "bicycle",
+    "motorcycle",
+    "car",
+    "scooter",
+    "van",
+    "truck",
+  ];
+  if (
+    !Number.isInteger(riderId) ||
+    riderId <= 0 ||
+    !allowedVehicleTypes.includes(vehicleType) ||
+    (vehicleModel !== null && typeof vehicleModel !== "string") ||
+    (vehicleColor !== null && typeof vehicleColor !== "string") ||
+    (vehiclePlateNumber !== null && typeof vehiclePlateNumber !== "string") ||
+    (licenseNumber !== null && typeof licenseNumber !== "string") ||
+    vehicleModel?.length > 50 ||
+    vehicleColor?.length > 30 ||
+    vehiclePlateNumber?.length > 20 ||
+    licenseNumber?.length > 50
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: "Enter valid rider and vehicle details.",
+    });
+  }
+
+  try {
+    const [rider] = await db
+      .update(schema.riders)
+      .set({
+        vehicleType,
+        vehicleModel,
+        vehicleColor,
+        vehiclePlateNumber,
+        licenseNumber,
+      })
+      .where(eq(schema.riders.riderId, riderId))
+      .returning({
+        riderId: schema.riders.riderId,
+        userId: schema.riders.userId,
+        vehicleType: schema.riders.vehicleType,
+        vehicleModel: schema.riders.vehicleModel,
+        vehicleColor: schema.riders.vehicleColor,
+        vehiclePlateNumber: schema.riders.vehiclePlateNumber,
+        licenseNumber: schema.riders.licenseNumber,
+        isAvailable: schema.riders.isAvailable,
+        isApproved: schema.riders.isApproved,
+      });
+    if (!rider) {
+      return res.status(404).json({
+        success: false,
+        message: "Rider not found.",
+      });
+    }
+    return res.json({ success: true, data: rider });
+  } catch (error) {
+    console.error("Could not update rider profile:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Could not update rider details.",
+    });
+  }
+});
+
 // Get rider by ID
 riderRoute.get("/riders/:id", async (req, res) => {
   try {

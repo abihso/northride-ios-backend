@@ -95,6 +95,29 @@ export function createRiderDashboardHandler({ db }) {
           .from(schema.riderEarnings)
           .where(eq(schema.riderEarnings.riderId, rider.riderId)),
       ]);
+      const activeRideUserIds = [
+        ...new Set(activeRides.map((ride) => ride.userId)),
+      ];
+      const activeRideUsers = activeRideUserIds.length
+        ? await db
+            .select({
+              userId: schema.users.userId,
+              fullName: schema.users.fullName,
+              phoneNumber: schema.users.phoneNumber,
+            })
+            .from(schema.users)
+            .where(inArray(schema.users.userId, activeRideUserIds))
+        : [];
+      const usersById = new Map(
+        activeRideUsers.map(({ userId, fullName, phoneNumber }) => [
+          userId,
+          { fullName, phoneNumber },
+        ]),
+      );
+      const activeRidesWithCustomer = activeRides.map((ride) => ({
+        ...ride,
+        customer: usersById.get(ride.userId) ?? null,
+      }));
 
       let deliveryOffers = [];
       let rideOffers = [];
@@ -201,7 +224,7 @@ export function createRiderDashboardHandler({ db }) {
         data: {
           rider,
           activeDeliveries,
-          activeRides,
+          activeRides: activeRidesWithCustomer,
           offers: { deliveries: deliveryOffers, rides: rideOffers },
           earnings: {
             totalEarned: Number(totals[0]?.totalEarned ?? 0),

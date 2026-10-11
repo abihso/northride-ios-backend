@@ -184,4 +184,39 @@ ticketrouter.patch("/support-tickets/:id", async (req, res) => {
   }
 });
 
+ticketrouter.delete("/support-tickets/:id", async (req, res) => {
+  if (req.user?.userType !== "admin") {
+    return res.status(403).json({
+      success: false,
+      message: "Administrator access required.",
+    });
+  }
+  const ticketId = Number(req.params.id);
+  if (!Number.isInteger(ticketId) || ticketId <= 0) {
+    return res.status(400).json({
+      success: false,
+      message: "A valid support ticket ID is required.",
+    });
+  }
+  try {
+    const [ticket] = await db
+      .delete(schema.supportTickets)
+      .where(eq(schema.supportTickets.ticketId, ticketId))
+      .returning({ ticketId: schema.supportTickets.ticketId });
+    if (!ticket) {
+      return res.status(404).json({
+        success: false,
+        message: "Support ticket not found.",
+      });
+    }
+    return res.json({ success: true, message: "Support ticket deleted." });
+  } catch (error) {
+    console.error("Could not delete support ticket:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Could not delete the support ticket.",
+    });
+  }
+});
+
 export default ticketrouter;
