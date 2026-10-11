@@ -127,6 +127,20 @@
       "when": 1791659450120,
       "tag": "0017_strong_frog_thor",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1791746400000,
+      "tag": "0018_home_page_content",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1791747086570,
+      "tag": "0019_giant_king_cobra",
+      "breakpoints": true
     }
   ]
 }

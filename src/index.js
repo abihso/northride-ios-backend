@@ -14,6 +14,7 @@ import authRoute from "./routes/authroute.js";
 import configRoute from "./routes/configRoute.js";
 import deliveryRouter from "./routes/delivery.js";
 import mapsRoute from "./routes/mapsRoute.js";
+import homePageContentRouter from "./routes/homePageContentRoute.js";
 import notificationrouter from "./routes/notificationRoute.js";
 import orderroute from "./routes/orderRoute.js";
 import pricerouter from "./routes/pricingRoute.js";
@@ -153,6 +154,7 @@ app.get("/abihsolo", (r, res) => {
 });
 
 const publicApiRoutes = new Set([
+  "GET /home-page-content",
   "POST /login",
   "POST /users",
   "POST /verify-email",
@@ -173,19 +175,34 @@ app.use("/api", (req, res, next) => {
   }
   const isAdminMutation =
     (req.method === "POST" &&
-      ["/shops", "/products", "/ride-pricing", "/notifications"].includes(
+      [
+        "/shops",
+        "/products",
+        "/ride-pricing",
+        "/notifications",
+        "/admin/home-page-content",
+        "/admin/home-page-content/upload",
+      ].includes(
         path,
       )) ||
     (req.method === "PATCH" &&
       (/^\/products\/\d+\/stock$/.test(path) ||
         /^\/support-tickets\/\d+$/.test(path) ||
-        /^\/rider-earnings\/\d+\/pay$/.test(path))) ||
+        /^\/rider-earnings\/\d+\/pay$/.test(path) ||
+        /^\/admin\/home-page-content\/\d+$/.test(path))) ||
+    (req.method === "DELETE" &&
+      /^\/admin\/home-page-content\/\d+$/.test(path)) ||
     (req.method === "PUT" &&
       (/^\/system-config\/[^/]+$/.test(path) ||
         path === "/admin/pricing-rates"));
   const isAdminRead =
     req.method === "GET" &&
-    ["/system-config", "/admin/rides", "/admin/pricing-rates"].includes(path);
+    [
+      "/system-config",
+      "/admin/rides",
+      "/admin/pricing-rates",
+      "/admin/home-page-content",
+    ].includes(path);
   if (
     (isAdminMutation || isAdminRead) &&
     req.user?.userType !== "admin"
@@ -221,6 +238,7 @@ app.use("/api", sysrouter);
 app.use("/api", deliveryRouter);
 app.use("/api", configRoute);
 app.use("/api", mapsRoute);
+app.use("/api", homePageContentRouter);
 
 app.get("/", async (req, res) => {
   return res.status(200).json({ status: "ok" });

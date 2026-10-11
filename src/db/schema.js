@@ -35,6 +35,7 @@ export const priorityEnum = pgEnum("priority", ["low", "medium", "high", "urgent
 export const supportStatusEnum = pgEnum("support_status", ["open", "in_progress", "resolved", "closed"]);
 export const discountTypeEnum = pgEnum("discount_type", ["percentage", "fixed"]);
 export const applicableToEnum = pgEnum("applicable_to", ["delivery", "ride", "both"]);
+export const homeContentTypeEnum = pgEnum("home_content_type", ["promotion", "suggestion"]);
 export const earningTypeEnum = pgEnum("earning_type", ["delivery", "ride", "bonus"]);
 export const matchStatusEnum = pgEnum("match_status", ["pending", "accepted", "rejected", "completed"]);
 export const paymentTypeEnum = pgEnum("payment_type", ["order", "ride", "delivery", "wallet_topup", "withdrawal"]);
@@ -644,6 +645,23 @@ export const promotions = pgTable("promotions", {
   promotions_code_idx: index("promotions_code_idx").on(table.promoCode),
   promotions_active_idx: index("promotions_active_idx").on(table.isActive),
   promotions_date_idx: index("promotions_date_idx").on(table.startDate, table.endDate),
+}));
+
+export const homePageContent = pgTable("home_page_content", {
+  homeContentId: serial("home_content_id").primaryKey(),
+  contentType: homeContentTypeEnum("content_type").notNull(),
+  title: varchar("title", { length: 100 }).notNull(),
+  imageUrl: varchar("image_url", { length: 2048 }).notNull(),
+  distance: varchar("distance", { length: 50 }),
+  location: varchar("location", { length: 150 }),
+  rating: decimal("rating", { precision: 3, scale: 2 }),
+  displayOrder: integer("display_order").notNull().default(0),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
+}, (table) => ({
+  home_page_content_type_idx: index("home_page_content_type_idx").on(table.contentType, table.isActive),
+  home_page_content_order_idx: index("home_page_content_order_idx").on(table.displayOrder, table.createdAt),
 }));
 
 // =============================================

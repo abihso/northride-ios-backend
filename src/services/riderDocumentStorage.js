@@ -39,7 +39,23 @@ export const createDocumentUploadUrl = async ({
   );
 };
 
-export const createDocumentViewUrl = async ({ key, contentType }) => {
+export const storeDocument = async ({ key, contentType, body }) => {
+  const { client: s3, bucket } = storageConfig();
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      ContentType: contentType,
+      Body: body,
+    }),
+  );
+};
+
+export const createDocumentViewUrl = async ({
+  key,
+  contentType,
+  expiresIn = 300,
+}) => {
   const { client: s3, bucket } = storageConfig();
   return getSignedUrl(
     s3,
@@ -50,7 +66,7 @@ export const createDocumentViewUrl = async ({ key, contentType }) => {
       ResponseContentDisposition: "inline",
       ResponseCacheControl: "private, no-store, max-age=0",
     }),
-    { expiresIn: 300 },
+    { expiresIn },
   );
 };
 
