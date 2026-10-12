@@ -182,16 +182,21 @@ app.use("/api", (req, res, next) => {
         "/notifications",
         "/admin/home-page-content",
         "/admin/home-page-content/upload",
+        "/admin/shop-images/upload",
       ].includes(
         path,
       )) ||
     (req.method === "PATCH" &&
-      (/^\/products\/\d+\/stock$/.test(path) ||
+      (/^\/shops\/\d+$/.test(path) ||
+        /^\/products\/\d+$/.test(path) ||
+        /^\/products\/\d+\/stock$/.test(path) ||
         /^\/support-tickets\/\d+$/.test(path) ||
         /^\/rider-earnings\/\d+\/pay$/.test(path) ||
         /^\/admin\/home-page-content\/\d+$/.test(path))) ||
     (req.method === "DELETE" &&
-      /^\/admin\/home-page-content\/\d+$/.test(path)) ||
+      (/^\/shops\/\d+$/.test(path) ||
+        /^\/products\/\d+$/.test(path) ||
+        /^\/admin\/home-page-content\/\d+$/.test(path))) ||
     (req.method === "PUT" &&
       (/^\/system-config\/[^/]+$/.test(path) ||
         path === "/admin/pricing-rates"));
@@ -244,7 +249,7 @@ app.get("/", async (req, res) => {
   return res.status(200).json({ status: "ok" });
 });
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 4000;
 // Note: Use `server.listen` instead of `app.listen` so WebSockets share the same port
 server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT} http://localhost:${PORT}`);

@@ -393,6 +393,18 @@ userRoute.delete("/users/:id", async (req, res) => {
       .from(schema.rideBookings)
       .where(eq(schema.rideBookings.userId, userId))
       .limit(1);
+    const [ownedShop] = await db
+      .select({ shopId: schema.shops.shopId })
+      .from(schema.shops)
+      .where(eq(schema.shops.ownerId, userId))
+      .limit(1);
+    if (ownedShop) {
+      return res.status(409).json({
+        success: false,
+        message:
+          "This account owns a shop and cannot be deleted until the shop is transferred or deleted. Disable the account instead if you do not want to transfer the shop.",
+      });
+    }
     const [assignedOrder] = rider
       ? await db
           .select({ orderId: schema.orders.orderId })

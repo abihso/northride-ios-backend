@@ -141,6 +141,13 @@
       "when": 1791747086570,
       "tag": "0019_giant_king_cobra",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1791778529018,
+      "tag": "0020_shop_order_items",
+      "breakpoints": true
     }
   ]
 }

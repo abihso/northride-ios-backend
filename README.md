@@ -17,8 +17,9 @@ authentication is recommended but is not required just to verify a sender.
 `SMTP_PASS`, `RESEND_API_KEY`, and `RESEND_FROM_EMAIL` are not used.
 
 `GOOGLE_MAPS_SERVER_API_KEY` is used only by the authenticated Places and
-Directions endpoints and for server-side delivery quotes. Restrict it to the
-Places API and Directions API, plus the backend's outbound IP where supported.
+Directions endpoints and for server-side delivery quotes. Enable billing and
+the Places API (Legacy) and Directions API for its Google Cloud project, then
+restrict the key to those APIs and the backend's outbound IP where supported.
 Set `GOOGLE_MAPS_ANDROID_API_KEY` in the Expo build environment for the native
 Android map SDK; restrict that key to this app's Android package and signing
 certificate. The SDK key is public in the installed app and must be restricted.

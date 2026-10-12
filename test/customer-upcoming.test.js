@@ -50,7 +50,7 @@ const response = () => ({
   },
 });
 
-test("upcoming tracking combines rides, send/receive deliveries, items, and live rider location", async () => {
+test("upcoming tracking includes delivery and shop items with live rider locations", async () => {
   const { db } = mockDb({
     ride_bookings: [
       {
@@ -89,6 +89,39 @@ test("upcoming tracking combines rides, send/receive deliveries, items, and live
     delivery_items: [
       { itemId: 12, deliveryId: 7, itemName: "Parcel", quantity: 2 },
     ],
+    orders: [
+      {
+        orderId: 21,
+        orderReference: "ORD-21",
+        status: "in_transit",
+        shopId: 3,
+        riderId: 8,
+        deliveryAddress: "Customer address",
+        deliveryLatitude: "5.61",
+        deliveryLongitude: "-0.19",
+        pickupLatitude: null,
+        pickupLongitude: null,
+      },
+    ],
+    shops: [
+      {
+        shopId: 3,
+        shopName: "North Market",
+        pickupAddress: "Market Road",
+        pickupLatitude: "5.6",
+        pickupLongitude: "-0.18",
+      },
+    ],
+    order_items: [
+      {
+        orderItemId: 51,
+        orderId: 21,
+        productName: "Rice",
+        quantity: 2,
+        unitPrice: "20.00",
+        lineTotal: "40.00",
+      },
+    ],
   });
   const res = response();
 
@@ -105,6 +138,10 @@ test("upcoming tracking combines rides, send/receive deliveries, items, and live
   assert.equal(res.body.data.deliveries[0].items[0].itemName, "Parcel");
   assert.equal(res.body.data.deliveries[1].deliveryType, "receive");
   assert.equal(res.body.data.deliveries[1].rider, null);
+  assert.equal(res.body.data.orders[0].shopName, "North Market");
+  assert.equal(res.body.data.orders[0].pickupAddress, "Market Road");
+  assert.equal(res.body.data.orders[0].rider.fullName, "Rider One");
+  assert.equal(res.body.data.orders[0].items[0].productName, "Rice");
 });
 
 test("upcoming tracking returns empty collections when there is no current data", async () => {
@@ -116,7 +153,7 @@ test("upcoming tracking returns empty collections when there is no current data"
     res,
   );
 
-  assert.deepEqual(res.body.data, { rides: [], deliveries: [] });
+  assert.deepEqual(res.body.data, { rides: [], deliveries: [], orders: [] });
 });
 
 test("upcoming tracking denies requests for another customer's account", async () => {

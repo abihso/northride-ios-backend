@@ -278,6 +278,7 @@ export const orders = pgTable("orders", {
   shopId: integer("shop_id").notNull().references(() => shops.shopId, { onDelete: "cascade" }),
   riderId: integer("rider_id").references(() => riders.riderId, { onDelete: "set null" }),
   orderReference: varchar("order_reference", { length: 50 }).notNull().unique(),
+  paymentReference: varchar("payment_reference", { length: 100 }).unique(),
   orderType: orderTypeEnum("order_type").default("delivery"),
   status: orderStatusEnum("status").default("pending"),
   paymentMethod: paymentMethodEnum("payment_method").notNull(),
@@ -318,6 +319,20 @@ export const orders = pgTable("orders", {
   orders_reference_idx: index("orders_reference_idx").on(table.orderReference),
   orders_date_idx: index("orders_date_idx").on(table.orderPlacedAt),
   orders_ride_idx: index("orders_ride_idx").on(table.rideId),
+}));
+
+export const orderItems = pgTable("order_items", {
+  orderItemId: serial("order_item_id").primaryKey(),
+  orderId: integer("order_id").notNull().references(() => orders.orderId, { onDelete: "cascade" }),
+  productId: integer("product_id").references(() => products.productId, { onDelete: "set null" }),
+  productName: varchar("product_name", { length: 100 }).notNull(),
+  unitPrice: decimal("unit_price", { precision: 10, scale: 2 }).notNull(),
+  quantity: integer("quantity").notNull(),
+  lineTotal: decimal("line_total", { precision: 10, scale: 2 }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+}, (table) => ({
+  orderItems_order_idx: index("order_items_order_idx").on(table.orderId),
+  orderItems_product_idx: index("order_items_product_idx").on(table.productId),
 }));
 
 // =============================================

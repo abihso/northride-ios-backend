@@ -15,6 +15,14 @@ const activeDeliveryStatuses = [
   "picked_up",
   "in_transit",
 ];
+const activeOrderStatuses = [
+  "pending",
+  "confirmed",
+  "preparing",
+  "ready",
+  "picked_up",
+  "in_transit",
+];
 
 export function createCustomerUpcomingHandler({ db }) {
   return async (req, res) => {
@@ -27,7 +35,7 @@ export function createCustomerUpcomingHandler({ db }) {
     }
 
     try {
-      const [rides, deliveries] = await Promise.all([
+      const [rides, deliveries, orders] = await Promise.all([
         db
           .select({
             rideId: schema.rideBookings.rideId,
@@ -91,18 +99,44 @@ export function createCustomerUpcomingHandler({ db }) {
           )
           .orderBy(desc(schema.deliveries.createdAt))
           .limit(20),
+        db
+          .select({
+            orderId: schema.orders.orderId,
+            orderReference: schema.orders.orderReference,
+            status: schema.orders.status,
+            paymentStatus: schema.orders.paymentStatus,
+            totalAmount: schema.orders.totalAmount,
+            deliveryAddress: schema.orders.deliveryAddress,
+            deliveryLatitude: schema.orders.deliveryLatitude,
+            deliveryLongitude: schema.orders.deliveryLongitude,
+            pickupLatitude: schema.orders.pickupLatitude,
+            pickupLongitude: schema.orders.pickupLongitude,
+            orderPlacedAt: schema.orders.orderPlacedAt,
+            riderId: schema.orders.riderId,
+            shopId: schema.orders.shopId,
+          })
+          .from(schema.orders)
+          .where(
+            and(
+              eq(schema.orders.userId, userId),
+              inArray(schema.orders.status, activeOrderStatuses),
+            ),
+          )
+          .orderBy(desc(schema.orders.orderPlacedAt))
+          .limit(20),
       ]);
 
       const riderIds = [
         ...new Set(
-          [...rides, ...deliveries]
+          [...rides, ...deliveries, ...orders]
             .map((job) => job.riderId)
             .filter((riderId) => Number.isInteger(riderId)),
         ),
       ];
       const deliveryIds = deliveries.map((delivery) => delivery.deliveryId);
+      const orderIds = orders.map((order) => order.orderId);
 
-      const [riders, items] = await Promise.all([
+      const [riders, items, shopList, orderItems] = await Promise.all([
         riderIds.length
           ? db
               .select({
@@ -130,6 +164,35 @@ export function createCustomerUpcomingHandler({ db }) {
               })
               .from(schema.deliveryItems)
               .where(inArray(schema.deliveryItems.deliveryId, deliveryIds))
+          : Promise.resolve([]),
+        orderIds.length
+          ? db
+              .select({
+                shopId: schema.shops.shopId,
+                shopName: schema.shops.shopName,
+                pickupAddress: schema.shops.address,
+                pickupLatitude: schema.shops.latitude,
+                pickupLongitude: schema.shops.longitude,
+              })
+              .from(schema.shops)
+              .where(
+                inArray(schema.shops.shopId, [
+                  ...new Set(orders.map((order) => order.shopId)),
+                ]),
+              )
+          : Promise.resolve([]),
+        orderIds.length
+          ? db
+              .select({
+                orderItemId: schema.orderItems.orderItemId,
+                orderId: schema.orderItems.orderId,
+                productName: schema.orderItems.productName,
+                quantity: schema.orderItems.quantity,
+                unitPrice: schema.orderItems.unitPrice,
+                lineTotal: schema.orderItems.lineTotal,
+              })
+              .from(schema.orderItems)
+              .where(inArray(schema.orderItems.orderId, orderIds))
           : Promise.resolve([]),
       ]);
 
@@ -170,6 +233,13 @@ export function createCustomerUpcomingHandler({ db }) {
         deliveryItems.push(item);
         itemsByDeliveryId.set(item.deliveryId, deliveryItems);
       }
+      const shopsById = new Map(shopList.map((shop) => [shop.shopId, shop]));
+      const orderItemsByOrderId = new Map();
+      for (const item of orderItems) {
+        const orderItemList = orderItemsByOrderId.get(item.orderId) ?? [];
+        orderItemList.push(item);
+        orderItemsByOrderId.set(item.orderId, orderItemList);
+      }
 
       return res.json({
         success: true,
@@ -185,6 +255,18 @@ export function createCustomerUpcomingHandler({ db }) {
               : null,
             items: itemsByDeliveryId.get(delivery.deliveryId) ?? [],
           })),
+          orders: orders.map((order) => {
+            const shop = shopsById.get(order.shopId);
+            return {
+              ...order,
+              pickupAddress: shop?.pickupAddress ?? "Shop pickup",
+              pickupLatitude: order.pickupLatitude ?? shop?.pickupLatitude ?? null,
+              pickupLongitude: order.pickupLongitude ?? shop?.pickupLongitude ?? null,
+              shopName: shop?.shopName ?? null,
+              rider: order.riderId ? (ridersById.get(order.riderId) ?? null) : null,
+              items: orderItemsByOrderId.get(order.orderId) ?? [],
+            };
+          }),
         },
       });
     } catch (error) {

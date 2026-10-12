@@ -3,14 +3,41 @@ import { calculateFare, getPerKmRate, isPricingService } from "../utils/pricing.
 
 const mapsRoute = Router();
 
-const googleRequest = async (url) => {
-  const response = await fetch(url);
-  const data = await response.json();
-  if (!response.ok || data.status !== "OK") {
+export const googleRequest = async (url, apiName, allowZeroResults = false) => {
+  let response;
+  try {
+    response = await fetch(url);
+  } catch (cause) {
     const error = new Error(
-      data.error_message || "Google Maps request failed.",
+      `Could not reach Google ${apiName}. Check the backend's outbound network connection.`,
+      { cause },
     );
     error.status = 502;
+    throw error;
+  }
+
+  const data = await response.json().catch(() => null);
+  const googleStatus = data?.status;
+  if (allowZeroResults && googleStatus === "ZERO_RESULTS") return data;
+  if (!response.ok || (googleStatus && googleStatus !== "OK") || !data) {
+    const providerMessage =
+      data?.error_message ||
+      data?.error?.message ||
+      (googleStatus === "ZERO_RESULTS" && apiName === "Directions"
+        ? "Google could not find a drivable route between this shop and the selected address. Try a nearby delivery address. If this happens for every address, ask an administrator to correct the shop's map coordinates."
+        : googleStatus === "REQUEST_DENIED"
+          ? "Check that the required Google Maps API is enabled, billing is active, and the backend server key is valid."
+          : googleStatus === "OVER_QUERY_LIMIT"
+            ? "Check the Google Maps API quota and billing for the backend server key."
+            : googleStatus === "UNKNOWN_ERROR"
+              ? "Google reported a temporary error. Please try again."
+              : null);
+    const status = googleStatus || `HTTP ${response.status}`;
+    const error = new Error(
+      `Google ${apiName} failed (${status})${providerMessage ? `: ${providerMessage}` : "."}`,
+    );
+    error.status = googleStatus === "ZERO_RESULTS" ? 422 : 502;
+    error.googleStatus = googleStatus || null;
     throw error;
   }
   return data;
@@ -51,7 +78,7 @@ export const getDirections = async (origin, destination) => {
   url.searchParams.set("origin", origin);
   url.searchParams.set("destination", destination);
   url.searchParams.set("key", key);
-  return googleRequest(url);
+  return googleRequest(url, "Directions");
 };
 
 export const getDeliveryQuote = async (delivery, service = "delivery") => {
@@ -151,7 +178,14 @@ mapsRoute.get("/maps/places", async (req, res) => {
     );
     autocompleteUrl.searchParams.set("input", input);
     autocompleteUrl.searchParams.set("key", key);
-    const autocomplete = await googleRequest(autocompleteUrl);
+    const autocomplete = await googleRequest(
+      autocompleteUrl,
+      "Places Autocomplete",
+      true,
+    );
+    if (autocomplete.status === "ZERO_RESULTS") {
+      return res.json({ success: true, data: [] });
+    }
     const places = await Promise.all(
       autocomplete.predictions.slice(0, 5).map(async (place) => {
         const detailsUrl = new URL(
@@ -160,7 +194,7 @@ mapsRoute.get("/maps/places", async (req, res) => {
         detailsUrl.searchParams.set("place_id", place.place_id);
         detailsUrl.searchParams.set("fields", "geometry");
         detailsUrl.searchParams.set("key", key);
-        const details = await googleRequest(detailsUrl);
+        const details = await googleRequest(detailsUrl, "Place Details");
         const location = details.result?.geometry?.location;
         return location
           ? {
