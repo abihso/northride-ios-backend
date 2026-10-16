@@ -156,6 +156,7 @@ app.get("/abihsolo", (r, res) => {
 const publicApiRoutes = new Set([
   "GET /home-page-content",
   "POST /login",
+  "POST /auth/social",
   "POST /users",
   "POST /verify-email",
   "POST /resend-verification",

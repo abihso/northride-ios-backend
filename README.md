@@ -24,6 +24,20 @@ Set `GOOGLE_MAPS_ANDROID_API_KEY` in the Expo build environment for the native
 Android map SDK; restrict that key to this app's Android package and signing
 certificate. The SDK key is public in the installed app and must be restricted.
 
+Google and Facebook sign-in are verified by the backend before a NorthRide
+session is created. Configure `GOOGLE_OAUTH_CLIENT_IDS` as a comma-separated
+allowlist of the Google Android, iOS, and web client IDs used by the app.
+Configure `FACEBOOK_APP_ID` and `FACEBOOK_APP_SECRET` from the same Facebook
+app used by the mobile build. These are backend-only variables; never expose
+the Facebook secret to the client. The mobile build separately needs
+`EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID`, `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID`,
+`EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID`, and `EXPO_PUBLIC_FACEBOOK_APP_ID`.
+Configure the Google OAuth clients with the app's package/bundle identifiers
+and signing certificate as required by each platform. Enable Facebook Login's
+native Android and iOS platforms and allow its `fb<APP_ID>://authorize`
+callback. The app registers native callback schemes through `app.config.js`;
+rebuild native binaries after changing IDs or schemes.
+
 Paystack's dashboard callback URL is not required. The backend supplies a
 per-transaction callback URL on its own public host, and the app verifies the
 returned transaction reference with Paystack before recording payment. Set
@@ -69,9 +83,9 @@ optional `phoneNumber`, `password` (minimum 8 characters), and `userType`.
 Rider accounts complete the normal rider onboarding flow before submitting
 documents.
 
-Before starting this backend version, apply pending migrations including
-`0016_rider_documents` to the configured PostgreSQL database from this
-directory:
+Before starting this backend version, apply pending migrations, including
+`0016_rider_documents`, `0021_kind_vermin`, and `0022_rainy_payback`, to the
+configured PostgreSQL database from this directory:
 
 ```sh
 npm run db:migrate

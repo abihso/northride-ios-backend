@@ -4,6 +4,14 @@ import * as schema from "../db/schema.js";
 const activeDeliveryStatuses = ["accepted", "picked_up", "in_transit"];
 const activeRideStatuses = ["confirmed", "arrived", "in_progress"];
 const openStatuses = ["pending", "searching"];
+const visibleOrderStatuses = [
+  "pending",
+  "confirmed",
+  "preparing",
+  "ready",
+  "picked_up",
+  "in_transit",
+];
 
 export function createRiderDashboardHandler({ db }) {
   return async (req, res) => {
@@ -63,7 +71,8 @@ export function createRiderDashboardHandler({ db }) {
         receiveDeliveryOffers: true,
       };
 
-      const [activeDeliveries, activeRides, totals] = await Promise.all([
+      const [activeDeliveries, activeRides, totals, assignedOrders] =
+        await Promise.all([
         db
           .select()
           .from(schema.deliveries)
@@ -94,7 +103,66 @@ export function createRiderDashboardHandler({ db }) {
           })
           .from(schema.riderEarnings)
           .where(eq(schema.riderEarnings.riderId, rider.riderId)),
+        db
+          .select()
+          .from(schema.orders)
+          .where(
+            and(
+              eq(schema.orders.riderId, rider.riderId),
+              inArray(schema.orders.status, visibleOrderStatuses),
+            ),
+          )
+          .orderBy(desc(schema.orders.orderPlacedAt))
+          .limit(20),
       ]);
+      const assignedOrderIds = assignedOrders.map((order) => order.orderId);
+      const [assignedOrderItems, assignedOrderShops] = assignedOrderIds.length
+        ? await Promise.all([
+            db
+              .select()
+              .from(schema.orderItems)
+              .where(inArray(schema.orderItems.orderId, assignedOrderIds)),
+            db
+              .select({
+                shopId: schema.shops.shopId,
+                shopName: schema.shops.shopName,
+                pickupAddress: schema.shops.address,
+                pickupLatitude: schema.shops.latitude,
+                pickupLongitude: schema.shops.longitude,
+              })
+              .from(schema.shops)
+              .where(
+                inArray(
+                  schema.shops.shopId,
+                  [...new Set(assignedOrders.map((order) => order.shopId))],
+                ),
+              ),
+          ])
+        : [[], []];
+      const ordersWithDetails = assignedOrders.map((order) => {
+        const shop = assignedOrderShops.find(
+          (item) => item.shopId === order.shopId,
+        );
+        return {
+          ...order,
+          shopName: shop?.shopName ?? "Shop",
+          pickupAddress: shop?.pickupAddress ?? "Pickup unavailable",
+          pickupLatitude: shop?.pickupLatitude ?? null,
+          pickupLongitude: shop?.pickupLongitude ?? null,
+          dropoffAddress: order.deliveryAddress ?? "Delivery address pending",
+          dropoffLatitude: order.deliveryLatitude,
+          dropoffLongitude: order.deliveryLongitude,
+          items: assignedOrderItems.filter(
+            (item) => item.orderId === order.orderId,
+          ),
+        };
+      });
+      const activeOrders = ordersWithDetails.filter(
+        (order) => order.riderAcceptedAt !== null,
+      );
+      const orderOffers = ordersWithDetails.filter(
+        (order) => order.riderAcceptedAt === null,
+      );
       const activeRideUserIds = [
         ...new Set(activeRides.map((ride) => ride.userId)),
       ];
@@ -125,7 +193,8 @@ export function createRiderDashboardHandler({ db }) {
         rider.isApproved &&
         rider.isAvailable &&
         activeDeliveries.length === 0 &&
-        activeRides.length === 0
+        activeRides.length === 0 &&
+        !assignedOrders.some((order) => order.riderAcceptedAt !== null)
       ) {
         const rejections = await db
           .select({
@@ -225,7 +294,12 @@ export function createRiderDashboardHandler({ db }) {
           rider,
           activeDeliveries,
           activeRides: activeRidesWithCustomer,
-          offers: { deliveries: deliveryOffers, rides: rideOffers },
+          activeOrders,
+          offers: {
+            deliveries: deliveryOffers,
+            rides: rideOffers,
+            orders: orderOffers,
+          },
           earnings: {
             totalEarned: Number(totals[0]?.totalEarned ?? 0),
             totalPending: Number(totals[0]?.totalPending ?? 0),

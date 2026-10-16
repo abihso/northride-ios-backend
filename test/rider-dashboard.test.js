@@ -160,6 +160,68 @@ test("active assigned rides include the passenger contact details for the rider"
   });
 });
 
+test("assigned shop orders include their shop and order items", async () => {
+  const assignedOrder = {
+    orderId: 31,
+    riderId: rider.riderId,
+    shopId: 5,
+    orderReference: "ORD-31",
+    status: "ready",
+    riderAcceptedAt: null,
+    deliveryAddress: "Customer address",
+    deliveryLatitude: "5.61",
+    deliveryLongitude: "-0.19",
+    deliveryFee: "12.50",
+    totalAmount: "52.50",
+    paymentMethod: "cash",
+    paymentStatus: "pending",
+    orderPlacedAt: new Date("2026-10-12T10:00:00Z"),
+  };
+  const item = {
+    orderItemId: 4,
+    orderId: assignedOrder.orderId,
+    productName: "Rice",
+    quantity: 2,
+  };
+  const { db } = mockDb({
+    riders: [[rider]],
+    rider_preferences: [[]],
+    deliveries: [[], []],
+    ride_bookings: [[], []],
+    orders: [[assignedOrder]],
+    order_items: [[item]],
+    shops: [[
+      {
+        shopId: 5,
+        shopName: "NorthRide Market",
+        pickupAddress: "Market Road",
+        pickupLatitude: "5.62",
+        pickupLongitude: "-0.17",
+      },
+    ]],
+    rider_earnings: [
+      [{ totalEarned: 0, totalPending: 0, totalPaid: 0 }],
+    ],
+    rider_rejections: [[]],
+  });
+  const res = response();
+
+  await createRiderDashboardHandler({ db })(
+    { user: { userId: 7 }, params: {} },
+    res,
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.data.activeOrders, []);
+  assert.equal(res.body.data.offers.orders[0].orderId, 31);
+  assert.equal(res.body.data.offers.orders[0].shopName, "NorthRide Market");
+  assert.equal(res.body.data.offers.orders[0].pickupAddress, "Market Road");
+  assert.equal(
+    res.body.data.offers.orders[0].items[0].productName,
+    "Rice",
+  );
+});
+
 test("rider offer preferences independently hide offer types", async () => {
   const { db } = mockDb({
     riders: [[rider]],
@@ -227,7 +289,11 @@ test("offline riders receive no work offers", async () => {
   );
 
   assert.equal(res.statusCode, 200);
-  assert.deepEqual(res.body.data.offers, { deliveries: [], rides: [] });
+  assert.deepEqual(res.body.data.offers, {
+    deliveries: [],
+    rides: [],
+    orders: [],
+  });
   assert.equal(
     queries.some((query) => query.tableName === "rider_rejections"),
     false,

@@ -7,6 +7,7 @@ import {
   eq,
   inArray,
   isNull,
+  isNotNull,
   lt,
   sql,
 } from "drizzle-orm";
@@ -542,6 +543,83 @@ orderroute.get("/orders/:id", async (req, res) => {
   }
 });
 
+orderroute.get("/riders/:riderId/orders", async (req, res) => {
+  const riderId = Number(req.params.riderId);
+  if (!Number.isInteger(riderId) || riderId <= 0) {
+    return res.status(400).json({
+      success: false,
+      message: "A valid rider ID is required.",
+    });
+  }
+
+  try {
+    if (req.user.userType !== "admin") {
+      if (req.user.userType !== "rider") {
+        return res.status(403).json({
+          success: false,
+          message: "You cannot view these rider orders.",
+        });
+      }
+      const [rider] = await db
+        .select({ riderId: schema.riders.riderId })
+        .from(schema.riders)
+        .where(eq(schema.riders.userId, req.user.userId))
+        .limit(1);
+      if (!rider || rider.riderId !== riderId) {
+        return res.status(403).json({
+          success: false,
+          message: "You cannot view these rider orders.",
+        });
+      }
+    }
+    const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 50));
+    const orders = await db
+      .select()
+      .from(schema.orders)
+      .where(eq(schema.orders.riderId, riderId))
+      .orderBy(desc(schema.orders.orderPlacedAt))
+      .limit(limit);
+    const orderIds = orders.map((order) => order.orderId);
+    const shopIds = [...new Set(orders.map((order) => order.shopId))];
+    const [items, shops] = orderIds.length
+      ? await Promise.all([
+          db
+            .select()
+            .from(schema.orderItems)
+            .where(inArray(schema.orderItems.orderId, orderIds)),
+          db
+            .select({
+              shopId: schema.shops.shopId,
+              shopName: schema.shops.shopName,
+              pickupAddress: schema.shops.address,
+            })
+            .from(schema.shops)
+            .where(inArray(schema.shops.shopId, shopIds)),
+        ])
+      : [[], []];
+    return res.json({
+      success: true,
+      data: orders.map((order) => ({
+        ...order,
+        shopName:
+          shops.find((shop) => shop.shopId === order.shopId)?.shopName ??
+          "Shop",
+        pickupAddress:
+          shops.find((shop) => shop.shopId === order.shopId)?.pickupAddress ??
+          "Pickup unavailable",
+        dropoffAddress: order.deliveryAddress ?? "Delivery address pending",
+        items: items.filter((item) => item.orderId === order.orderId),
+      })),
+    });
+  } catch (error) {
+    console.error("Could not load rider orders:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Could not load rider orders.",
+    });
+  }
+});
+
 orderroute.post("/orders/:id/cancel", async (req, res) => {
   try {
     const orderId = Number(req.params.id);
@@ -692,11 +770,6 @@ orderroute.get("/users/:userId/orders", async (req, res) => {
 
 // Update order status
 orderroute.patch("/orders/:id/status", async (req, res) => {
-  if (req.user.userType !== "admin") {
-    return res
-      .status(403)
-      .json({ success: false, message: "Administrator access required." });
-  }
   try {
     const { status } = req.body;
     const orderId = parseInt(req.params.id);
@@ -718,17 +791,64 @@ orderroute.patch("/orders/:id/status", async (req, res) => {
         message: "A valid order status is required.",
       });
     }
+    const [currentOrder] = await db
+      .select()
+      .from(schema.orders)
+      .where(eq(schema.orders.orderId, orderId))
+      .limit(1);
+    if (!currentOrder) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found.",
+      });
+    }
+
+    const isRider = req.user.userType === "rider";
+    const riderStatuses = {
+      ready: "picked_up",
+      picked_up: "in_transit",
+      in_transit: "delivered",
+    };
+    const rider =
+      isRider
+        ? (
+            await db
+              .select()
+              .from(schema.riders)
+              .where(eq(schema.riders.userId, req.user.userId))
+              .limit(1)
+          )[0]
+        : null;
+    if (
+      isRider &&
+      (!rider?.isApproved ||
+        currentOrder.riderId !== rider.riderId ||
+        !currentOrder.riderAcceptedAt ||
+        riderStatuses[currentOrder.status] !== status)
+    ) {
+      return res.status(409).json({
+        success: false,
+        message: "This order is not ready for that rider update.",
+      });
+    }
+    if (!isRider && req.user.userType !== "admin") {
+      return res.status(403).json({
+        success: false,
+        message: "Administrator access required.",
+      });
+    }
+    if (
+      isRider &&
+      status === "delivered" &&
+      currentOrder.paymentMethod !== "cash" &&
+      currentOrder.paymentStatus !== "paid"
+    ) {
+      return res.status(409).json({
+        success: false,
+        message: "Payment must be confirmed before completing this order.",
+      });
+    }
     if (status === "cancelled" || status === "rejected") {
-      const [currentOrder] = await db
-        .select()
-        .from(schema.orders)
-        .where(eq(schema.orders.orderId, orderId))
-        .limit(1);
-      if (!currentOrder) {
-        return res
-          .status(404)
-          .json({ success: false, message: "Order not found." });
-      }
       if (
         currentOrder.paymentMethod === "card" &&
         currentOrder.paymentStatus === "pending"
@@ -794,13 +914,25 @@ orderroute.patch("/orders/:id/status", async (req, res) => {
     const [order] = await db
       .update(schema.orders)
       .set(updateData)
-      .where(eq(schema.orders.orderId, orderId))
+      .where(
+        isRider
+          ? and(
+              eq(schema.orders.orderId, orderId),
+              eq(schema.orders.riderId, rider.riderId),
+              eq(schema.orders.status, currentOrder.status),
+              isNotNull(schema.orders.riderAcceptedAt),
+            )
+          : eq(schema.orders.orderId, orderId),
+      )
       .returning();
 
     if (!order) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Order not found" });
+      return res.status(isRider ? 409 : 404).json({
+        success: false,
+        message: isRider
+          ? "This order changed before your update could be saved."
+          : "Order not found.",
+      });
     }
     res.json({ success: true, data: order });
   } catch (error) {
@@ -847,20 +979,212 @@ orderroute.patch("/orders/:id/assign-rider", async (req, res) => {
       }
     }
 
-    const [order] = await db
-      .update(schema.orders)
-      .set({ riderId })
+    const [existingOrder] = await db
+      .select({ riderId: schema.orders.riderId })
+      .from(schema.orders)
       .where(eq(schema.orders.orderId, orderId))
-      .returning();
-
-    if (!order) {
+      .limit(1);
+    if (!existingOrder) {
       return res
         .status(404)
         .json({ success: false, message: "Order not found" });
     }
+    const [order] = await db
+      .update(schema.orders)
+      .set({
+        riderId,
+        ...(existingOrder.riderId !== riderId ? { riderAcceptedAt: null } : {}),
+      })
+      .where(eq(schema.orders.orderId, orderId))
+      .returning();
+
     res.json({ success: true, data: order });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+orderroute.post("/orders/:id/rider-decision", async (req, res) => {
+  if (req.user.userType !== "rider") {
+    return res.status(403).json({
+      success: false,
+      message: "Rider access required.",
+    });
+  }
+  const orderId = Number(req.params.id);
+  const { decision } = req.body || {};
+  if (
+    !Number.isInteger(orderId) ||
+    orderId <= 0 ||
+    !["accept", "reject"].includes(decision)
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: "A valid order and rider decision are required.",
+    });
+  }
+
+  try {
+    const [rider] = await db
+      .select({ riderId: schema.riders.riderId, isApproved: schema.riders.isApproved })
+      .from(schema.riders)
+      .where(eq(schema.riders.userId, req.user.userId))
+      .limit(1);
+    if (!rider?.isApproved) {
+      return res.status(403).json({
+        success: false,
+        message: "An approved rider account is required.",
+      });
+    }
+
+    const result = await db.transaction(async (tx) => {
+      const [order] = await tx
+        .select()
+        .from(schema.orders)
+        .where(eq(schema.orders.orderId, orderId))
+        .for("update")
+        .limit(1);
+      if (!order) return { status: 404, message: "Order not found." };
+      if (order.riderId !== rider.riderId) {
+        return { status: 403, message: "This order is not assigned to you." };
+      }
+      if (decision === "reject") {
+        if (order.riderAcceptedAt) {
+          return {
+            status: 409,
+            message: "An accepted order cannot be rejected.",
+          };
+        }
+        if (
+          !["pending", "confirmed", "preparing", "ready"].includes(order.status)
+        ) {
+          return {
+            status: 409,
+            message: "This order can no longer be rejected.",
+          };
+        }
+        const [unassignedOrder] = await tx
+          .update(schema.orders)
+          .set({ riderId: null, riderAcceptedAt: null })
+          .where(
+            and(
+              eq(schema.orders.orderId, orderId),
+              eq(schema.orders.riderId, rider.riderId),
+              isNull(schema.orders.riderAcceptedAt),
+            ),
+          )
+          .returning();
+        return unassignedOrder
+          ? { order: unassignedOrder }
+          : {
+              status: 409,
+              message: "This order changed before it could be rejected.",
+            };
+      }
+      if (order.riderAcceptedAt) return { order };
+      if (order.status !== "ready") {
+        return {
+          status: 409,
+          message: "Accept this order after the shop marks it ready.",
+        };
+      }
+      if (
+        order.paymentMethod !== "cash" &&
+        order.paymentStatus !== "paid"
+      ) {
+        return {
+          status: 409,
+          message: "This order must be paid before it can be accepted.",
+        };
+      }
+      await tx
+        .select({ riderId: schema.riders.riderId })
+        .from(schema.riders)
+        .where(eq(schema.riders.riderId, rider.riderId))
+        .for("update");
+      const [activeDelivery] = await tx
+        .select({ deliveryId: schema.deliveries.deliveryId })
+        .from(schema.deliveries)
+        .where(
+          and(
+            eq(schema.deliveries.riderId, rider.riderId),
+            inArray(schema.deliveries.status, [
+              "accepted",
+              "picked_up",
+              "in_transit",
+            ]),
+          ),
+        )
+        .limit(1);
+      const [activeRide] = await tx
+        .select({ rideId: schema.rideBookings.rideId })
+        .from(schema.rideBookings)
+        .where(
+          and(
+            eq(schema.rideBookings.riderId, rider.riderId),
+            inArray(schema.rideBookings.status, [
+              "confirmed",
+              "arrived",
+              "in_progress",
+            ]),
+          ),
+        )
+        .limit(1);
+      const [activeOrder] = await tx
+        .select({ orderId: schema.orders.orderId })
+        .from(schema.orders)
+        .where(
+          and(
+            eq(schema.orders.riderId, rider.riderId),
+            isNotNull(schema.orders.riderAcceptedAt),
+            inArray(schema.orders.status, ["ready", "picked_up", "in_transit"]),
+          ),
+        )
+        .limit(1);
+      if (activeDelivery || activeRide || activeOrder) {
+        return {
+          status: 409,
+          message: "Finish your current job before accepting another order.",
+        };
+      }
+      const [acceptedOrder] = await tx
+        .update(schema.orders)
+        .set({ riderAcceptedAt: new Date() })
+        .where(
+          and(
+            eq(schema.orders.orderId, orderId),
+            eq(schema.orders.riderId, rider.riderId),
+            eq(schema.orders.status, "ready"),
+            isNull(schema.orders.riderAcceptedAt),
+          ),
+        )
+        .returning();
+      if (!acceptedOrder) {
+        return {
+          status: 409,
+          message: "This order changed before it could be accepted.",
+        };
+      }
+      await tx
+        .update(schema.riders)
+        .set({ isAvailable: false })
+        .where(eq(schema.riders.riderId, rider.riderId));
+      return { order: acceptedOrder };
+    });
+
+    if (result.status) {
+      return res.status(result.status).json({
+        success: false,
+        message: result.message,
+      });
+    }
+    return res.json({ success: true, data: result.order });
+  } catch (error) {
+    console.error("Could not update rider order decision:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Could not update the order.",
+    });
   }
 });
 
